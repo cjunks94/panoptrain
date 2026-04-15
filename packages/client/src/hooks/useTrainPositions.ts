@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import type { TrainsResponse } from "@panoptrain/shared";
 import { fetchTrains } from "../lib/api.js";
 
-const POLL_INTERVAL = parseInt(import.meta.env.VITE_POLL_INTERVAL_MS ?? "15000", 10);
+const POLL_INTERVAL = parseInt(import.meta.env.VITE_POLL_INTERVAL_MS ?? "30000", 10);
 const STALE_THRESHOLD = 90_000; // 90 seconds
 
 interface UseTrainPositionsResult {

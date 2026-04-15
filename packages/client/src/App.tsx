@@ -4,15 +4,15 @@ import { AppShell } from "./components/Layout/AppShell.js";
 import { TransitMap } from "./components/Map/TransitMap.js";
 import { FilterPanel } from "./components/Panel/FilterPanel.js";
 import { useTrainPositions } from "./hooks/useTrainPositions.js";
-import { useAnimatedPositions } from "./hooks/useAnimatedPositions.js";
+import { useTrainFeatures } from "./hooks/useTrainFeatures.js";
 import { useRouteShapes } from "./hooks/useRouteShapes.js";
 import { useLineFilter } from "./hooks/useLineFilter.js";
 
 export default function App() {
   const { data, isStale, lastUpdated } = useTrainPositions();
-  const animatedTrains = useAnimatedPositions(data);
   const { routeShapes, stopsGeoJson } = useRouteShapes();
   const { visibleRoutes, toggleRoute, toggleGroup, allOn, allOff } = useLineFilter();
+  const { geojsonRef, interpolateFrame, trains } = useTrainFeatures(data, visibleRoutes);
   const [panelOpen, setPanelOpen] = useState(true);
 
   const togglePanel = useCallback(() => setPanelOpen((p) => !p), []);
@@ -20,10 +20,11 @@ export default function App() {
   return (
     <AppShell>
       <TransitMap
-        trains={animatedTrains}
+        geojsonRef={geojsonRef}
+        interpolateFrame={interpolateFrame}
+        trains={trains}
         routeShapes={routeShapes}
         stops={stopsGeoJson}
-        visibleRoutes={visibleRoutes}
       />
       <FilterPanel
         open={panelOpen}

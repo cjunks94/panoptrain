@@ -1,12 +1,13 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import Map, { Source, Layer, Popup } from "react-map-gl/maplibre";
 import type { MapLayerMouseEvent, MapRef } from "react-map-gl/maplibre";
 import type { RoutesGeoJSON, StopsGeoJSON } from "@panoptrain/shared";
-import type { AnimatedTrain } from "../../hooks/useAnimatedPositions.js";
+import type { TrainInfo } from "../../hooks/useTrainFeatures.js";
 import type { GeoJSON } from "geojson";
 
 const BASEMAP = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 const NYC_CENTER = { longitude: -73.98, latitude: 40.75, zoom: 12 };
+const FRAME_INTERVAL = 66; // ~15fps
 
 /** Generate a filled circle as SDF-compatible ImageData */
 function createCircleIcon(size: number): ImageData {
@@ -38,84 +39,46 @@ function createSquareIcon(size: number): ImageData {
 }
 
 interface TransitMapProps {
-  trains: AnimatedTrain[];
+  geojsonRef: React.MutableRefObject<GeoJSON.FeatureCollection>;
+  interpolateFrame: () => void;
+  trains: TrainInfo[];
   routeShapes: RoutesGeoJSON | null;
   stops: StopsGeoJSON | null;
-  visibleRoutes: Set<string>;
 }
 
 interface PopupInfo {
-  train: AnimatedTrain;
+  train: TrainInfo;
   lng: number;
   lat: number;
 }
 
-export function TransitMap({ trains, routeShapes, stops, visibleRoutes }: TransitMapProps) {
+export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, stops }: TransitMapProps) {
   const [popup, setPopup] = useState<PopupInfo | null>(null);
   const [iconsReady, setIconsReady] = useState(false);
+  const mapRef = useRef<MapRef>(null);
 
-  // Build GeoJSON for train markers:
-  // 1. Dedupe stopped trains — one marker per route per stop
-  // 2. Fan out remaining overlaps horizontally
-  const trainsGeoJson = useMemo<GeoJSON.FeatureCollection>(() => {
-    const visible = trains.filter((t) => visibleRoutes.has(t.routeId));
+  // RAF loop — interpolates coordinates and pushes directly to MapLibre (no React renders)
+  useEffect(() => {
+    let rafId = 0;
+    let lastFrame = 0;
 
-    // Deduplicate: within each ~50m grid cell, keep one train per route.
-    // At terminals, many trains pile up with various statuses (STOPPED_AT,
-    // INCOMING_AT, IN_TRANSIT_TO) — all interpolated to the same position.
-    const DEDUP_GRID = 0.0005; // ~50m
-    const seenRouteAtGrid = new Set<string>();
-    const deduped = visible.filter((t) => {
-      const gx = Math.round(t.longitude / DEDUP_GRID);
-      const gy = Math.round(t.latitude / DEDUP_GRID);
-      const key = `${gx},${gy}-${t.routeId}`;
-      if (seenRouteAtGrid.has(key)) return false;
-      seenRouteAtGrid.add(key);
-      return true;
-    });
-
-    const features = deduped.map((t) => ({
-      type: "Feature" as const,
-      properties: {
-        tripId: t.tripId,
-        routeId: t.routeId,
-        color: t.color,
-        textColor: t.textColor,
-        isExpress: t.isExpress,
-        direction: t.direction,
-        bearing: t.bearing ?? (t.direction === 0 ? 0 : 180),
-        status: t.status,
-        destination: t.destination,
-        currentStopName: t.currentStopName,
-        nextStopName: t.nextStopName ?? "",
-        delay: t.delay ?? 0,
-        clusterOffset: 0,
-      },
-      geometry: {
-        type: "Point" as const,
-        coordinates: [t.longitude, t.latitude],
-      },
-    }));
-
-    // Detect remaining overlaps and assign pixel offsets to fan them out
-    const GRID = 0.0005; // ~50m snap for proximity grouping
-    const groups: Record<string, number[]> = {};
-    for (let i = 0; i < features.length; i++) {
-      const [lon, lat] = features[i].geometry.coordinates;
-      const key = `${Math.round(lon / GRID)},${Math.round(lat / GRID)}`;
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(i);
-    }
-    for (const indices of Object.values(groups)) {
-      if (indices.length <= 1) continue;
-      const center = (indices.length - 1) / 2;
-      for (let j = 0; j < indices.length; j++) {
-        features[indices[j]].properties.clusterOffset = j - center;
+    const animate = () => {
+      const now = Date.now();
+      if (now - lastFrame >= FRAME_INTERVAL) {
+        lastFrame = now;
+        interpolateFrame();
+        const map = mapRef.current?.getMap();
+        const source = map?.getSource("trains");
+        if (source && "setData" in source) {
+          (source as { setData: (data: GeoJSON.FeatureCollection) => void }).setData(geojsonRef.current);
+        }
       }
-    }
+      rafId = requestAnimationFrame(animate);
+    };
 
-    return { type: "FeatureCollection", features };
-  }, [trains, visibleRoutes]);
+    rafId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(rafId);
+  }, [geojsonRef, interpolateFrame]);
 
   const handleMapLoad = useCallback((e: { target: ReturnType<MapRef["getMap"]> }) => {
     const map = e.target;
@@ -141,14 +104,22 @@ export function TransitMap({ trains, routeShapes, stops, visibleRoutes }: Transi
       const props = feature.properties;
       const train = trains.find((t) => t.tripId === props.tripId);
       if (train) {
-        setPopup({ train, lng: train.longitude, lat: train.latitude });
+        // Use animated position from GeoJSON feature
+        const geoFeature = geojsonRef.current.features.find(
+          (f) => f.properties?.tripId === props.tripId,
+        );
+        const coords = geoFeature?.geometry && "coordinates" in geoFeature.geometry
+          ? geoFeature.geometry.coordinates as [number, number]
+          : [train.longitude, train.latitude];
+        setPopup({ train, lng: coords[0], lat: coords[1] });
       }
     },
-    [trains],
+    [trains, geojsonRef],
   );
 
   return (
     <Map
+      ref={mapRef}
       initialViewState={NYC_CENTER}
       style={{ width: "100%", height: "100%" }}
       mapStyle={BASEMAP}
@@ -172,25 +143,69 @@ export function TransitMap({ trains, routeShapes, stops, visibleRoutes }: Transi
         </Source>
       )}
 
-      {/* Station dots */}
+      {/* Stations */}
       {stops && (
         <Source id="stops" type="geojson" data={stops}>
           <Layer
             id="station-dots"
             type="circle"
             paint={{
-              "circle-radius": 2,
-              "circle-color": "#555",
-              "circle-stroke-width": 0.5,
-              "circle-stroke-color": "#777",
+              "circle-radius": [
+                "interpolate", ["linear"], ["zoom"],
+                11, 1.5,
+                14, 4,
+                16, 6,
+              ],
+              "circle-color": "#ffffff",
+              "circle-opacity": [
+                "interpolate", ["linear"], ["zoom"],
+                11, 0.3,
+                13, 0.6,
+                15, 0.9,
+              ],
+              "circle-stroke-width": [
+                "interpolate", ["linear"], ["zoom"],
+                11, 0,
+                14, 1,
+              ],
+              "circle-stroke-color": "#999",
+              "circle-stroke-opacity": 0.5,
             }}
-            minzoom={13}
+            minzoom={11}
+          />
+          <Layer
+            id="station-labels"
+            type="symbol"
+            minzoom={14}
+            layout={{
+              "text-field": ["get", "stopName"],
+              "text-size": [
+                "interpolate", ["linear"], ["zoom"],
+                14, 10,
+                16, 13,
+              ],
+              "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
+              "text-offset": [0, 1.2],
+              "text-anchor": "top",
+              "text-max-width": 8,
+              "text-optional": true,
+            }}
+            paint={{
+              "text-color": "#ccc",
+              "text-halo-color": "#1a1a2e",
+              "text-halo-width": 1.5,
+              "text-opacity": [
+                "interpolate", ["linear"], ["zoom"],
+                14, 0.6,
+                16, 1,
+              ],
+            }}
           />
         </Source>
       )}
 
-      {/* Train markers */}
-      <Source id="trains" type="geojson" data={trainsGeoJson}>
+      {/* Train markers — data pushed by RAF loop via source.setData() */}
+      <Source id="trains" type="geojson" data={geojsonRef.current}>
         {/* Glow layer (underneath) */}
         <Layer
           id="train-glow"
@@ -198,7 +213,7 @@ export function TransitMap({ trains, routeShapes, stops, visibleRoutes }: Transi
           paint={{
             "circle-radius": 14,
             "circle-color": ["get", "color"],
-            "circle-opacity": 0.2,
+            "circle-opacity": ["*", 0.2, ["get", "opacity"]],
             "circle-blur": 1,
           }}
         />
@@ -232,9 +247,9 @@ export function TransitMap({ trains, routeShapes, stops, visibleRoutes }: Transi
             }}
             paint={{
               "icon-color": ["get", "color"],
-              "icon-halo-color": "#ffffff",
-              "icon-halo-width": 1,
+              "icon-opacity": ["get", "opacity"],
               "text-color": ["get", "textColor"],
+              "text-opacity": ["get", "opacity"],
             }}
           />
         )}
@@ -258,7 +273,7 @@ export function TransitMap({ trains, routeShapes, stops, visibleRoutes }: Transi
           }}
           paint={{
             "text-color": "#ffffff",
-            "text-opacity": 0.85,
+            "text-opacity": ["*", 0.85, ["get", "opacity"]],
           }}
         />
       </Source>
