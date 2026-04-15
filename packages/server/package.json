@@ -1,0 +1,32 @@
+{
+  "name": "@panoptrain/server",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "download-gtfs": "tsx scripts/download-gtfs.ts"
+  },
+  "dependencies": {
+    "@panoptrain/shared": "workspace:*",
+    "@hono/node-server": "^1.13.0",
+    "hono": "^4.6.0",
+    "gtfs-realtime-bindings": "^1.1.1",
+    "protobufjs": "^7.4.0",
+    "@turf/along": "^7.1.0",
+    "@turf/length": "^7.1.0",
+    "@turf/nearest-point-on-line": "^7.1.0",
+    "@turf/bearing": "^7.1.0",
+    "@turf/helpers": "^7.1.0",
+    "csv-parse": "^5.6.0",
+    "jszip": "^3.10.0",
+    "zod": "^3.23.0",
+    "dotenv": "^16.4.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}
