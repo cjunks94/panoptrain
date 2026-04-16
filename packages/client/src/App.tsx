@@ -37,6 +37,7 @@ export default function App() {
         isStale={isStale}
         lastUpdated={lastUpdated}
         trainCount={data?.count ?? 0}
+        stops={stopsGeoJson}
       />
     </AppShell>
   );

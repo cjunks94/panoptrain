@@ -5,6 +5,7 @@ import { loadStaticGtfs } from "./services/gtfs-loader.js";
 import { startPolling } from "./services/mta-poller.js";
 import trains from "./routes/trains.js";
 import staticRoutes from "./routes/static.js";
+import plan from "./routes/plan.js";
 
 // Load env
 const PORT = parseInt(process.env.PORT ?? "3001", 10);
@@ -20,6 +21,7 @@ app.get("/api/health", (c) => c.json({ status: "ok", uptime: process.uptime() })
 
 // API routes
 app.route("/api/trains", trains);
+app.route("/api/plan", plan);
 app.route("/api", staticRoutes);
 
 // Load static GTFS data and start polling

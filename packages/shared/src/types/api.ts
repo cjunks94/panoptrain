@@ -59,3 +59,28 @@ export interface StopFeature {
     coordinates: [number, number];
   };
 }
+
+/** Trip planner response from GET /api/plan */
+export interface TripPlan {
+  from: { stopId: string; stopName: string };
+  to: { stopId: string; stopName: string };
+  totalMinutes: number;
+  totalStops: number;
+  transferCount: number;
+  segments: Array<RideSegment | TransferSegment>;
+}
+
+export interface RideSegment {
+  type: "ride";
+  routeId: string;
+  boardAt: { stopId: string; stopName: string };
+  alightAt: { stopId: string; stopName: string };
+  intermediateStops: number;
+  minutes: number;
+}
+
+export interface TransferSegment {
+  type: "transfer";
+  atStopName: string;
+  minutes: number;
+}

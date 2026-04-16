@@ -7,6 +7,9 @@ export type {
   RouteFeature,
   StopsGeoJSON,
   StopFeature,
+  TripPlan,
+  RideSegment,
+  TransferSegment,
 } from "./types/api.js";
 export type {
   ParsedVehicle,

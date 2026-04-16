@@ -63,4 +63,27 @@ test.describe("Panoptrain — happy path", () => {
     expect(Array.isArray(body.trains)).toBe(true);
     expect(body.count).toBeGreaterThan(0);
   });
+
+  test("trip planner finds a route between two stations", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "Panoptrain" })).toBeVisible();
+
+    // Wait for stops to load (datalist needs to be populated)
+    await expect(page.locator("text=PLAN TRIP")).toBeVisible();
+
+    await page.getByPlaceholder("From station").fill("Times Sq-42 St");
+    await page.getByPlaceholder("To station").fill("14 St");
+    await page.getByRole("button", { name: "Find Route" }).click();
+
+    // Result should appear with a "min" label and at least one stop count
+    await expect(page.locator("text=/\\d+ min/").first()).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("plan API returns a valid plan", async ({ request }) => {
+    const res = await request.get("http://localhost:3001/api/plan?from=127&to=132");
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.from.stopId).toBe("127");
+    expect(body.segments.length).toBeGreaterThan(0);
+  });
 });
