@@ -28,6 +28,20 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Cache GTFS static data
+        if: matrix.task == 'test'
+        uses: actions/cache@v4
+        with:
+          path: packages/server/src/data/gtfs
+          key: gtfs-static-v1
+
+      - name: Download GTFS data if not cached
+        if: matrix.task == 'test'
+        run: |
+          if [ ! -f packages/server/src/data/gtfs/stops.json ]; then
+            pnpm download-gtfs
+          fi
+
       - run: pnpm ${{ matrix.task }}
 
   e2e:
