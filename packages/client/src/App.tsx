@@ -12,7 +12,7 @@ export default function App() {
   const { data, isStale, lastUpdated } = useTrainPositions();
   const { routeShapes, stopsGeoJson } = useRouteShapes();
   const { visibleRoutes, toggleRoute, toggleGroup, allOn, allOff } = useLineFilter();
-  const { geojsonRef, interpolateFrame, trains } = useTrainFeatures(data, visibleRoutes);
+  const { geojsonRef, interpolateFrame, trains } = useTrainFeatures(data, visibleRoutes, routeShapes);
   const [panelOpen, setPanelOpen] = useState(true);
 
   const togglePanel = useCallback(() => setPanelOpen((p) => !p), []);

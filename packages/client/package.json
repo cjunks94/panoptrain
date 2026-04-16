@@ -9,6 +9,11 @@
   },
   "dependencies": {
     "@panoptrain/shared": "workspace:*",
+    "@turf/along": "^7.3.4",
+    "@turf/helpers": "^7.3.4",
+    "@turf/length": "^7.3.4",
+    "@turf/line-slice": "^7.3.4",
+    "@turf/nearest-point-on-line": "^7.3.4",
     "maplibre-gl": "^4.7.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

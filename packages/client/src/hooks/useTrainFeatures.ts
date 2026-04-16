@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import type { TrainsResponse, TrainPosition } from "@panoptrain/shared";
+import type { TrainsResponse, TrainPosition, RoutesGeoJSON } from "@panoptrain/shared";
 import { getRouteInfo } from "../lib/colors.js";
+import { buildShapeIndex, findTrackPath, interpolateAlongPath } from "../lib/trackInterpolation.js";
+import type { TrackPath } from "../lib/trackInterpolation.js";
 
 const POLL_INTERVAL = parseInt(import.meta.env.VITE_POLL_INTERVAL_MS ?? "30000", 10);
 
@@ -43,15 +45,24 @@ const EMPTY_FC: GeoJSON.FeatureCollection = { type: "FeatureCollection", feature
 export function useTrainFeatures(
   data: TrainsResponse | null,
   visibleRoutes: Set<string>,
+  routeShapes: RoutesGeoJSON | null,
 ) {
   const geojsonRef = useRef(EMPTY_FC);
   const prevPositions = useRef(new Map<string, [number, number]>());
   const currPositions = useRef(new Map<string, [number, number]>());
+  const trackPaths = useRef(new Map<string, TrackPath>());
   const snapshotTime = useRef(0);
   const lastDataRef = useRef<TrainsResponse | null>(null);
+  const shapeIndexRef = useRef<Record<string, ReturnType<typeof buildShapeIndex>[string]>>({});
   const [trains, setTrains] = useState<TrainInfo[]>([]);
 
-  // Shift position snapshots when new data arrives
+  // Build shape index once when route shapes load
+  useEffect(() => {
+    if (!routeShapes) return;
+    shapeIndexRef.current = buildShapeIndex(routeShapes);
+  }, [routeShapes]);
+
+  // Shift position snapshots when new data arrives (fast — no heavy computation)
   useEffect(() => {
     if (!data || data === lastDataRef.current) return;
     lastDataRef.current = data;
@@ -62,6 +73,31 @@ export function useTrainFeatures(
     }
     currPositions.current = positions;
     snapshotTime.current = Date.now();
+
+    // Defer track path computation off the main thread.
+    // First animation frames use linear interpolation; paths are ready by ~next frame.
+    const MIN_DIST_SQ = 0.002 * 0.002; // ~200m in degrees
+    const trainsToProcess = data.trains;
+    const prev = prevPositions.current;
+    const index = shapeIndexRef.current;
+
+    const tid = setTimeout(() => {
+      const paths = new Map<string, TrackPath>();
+      if (Object.keys(index).length > 0) {
+        for (const t of trainsToProcess) {
+          const p = prev.get(t.tripId);
+          if (!p) continue;
+          const dx = t.longitude - p[0];
+          const dy = t.latitude - p[1];
+          if (dx * dx + dy * dy < MIN_DIST_SQ) continue;
+          const path = findTrackPath(index, t.routeId, p, [t.longitude, t.latitude]);
+          if (path) paths.set(t.tripId, path);
+        }
+      }
+      trackPaths.current = paths;
+    }, 0);
+
+    return () => clearTimeout(tid);
   }, [data]);
 
   // Rebuild features when data or visibleRoutes change
@@ -152,6 +188,7 @@ export function useTrainFeatures(
     const fraction = Math.min(elapsed / POLL_INTERVAL, 1);
     const prev = prevPositions.current;
     const curr = currPositions.current;
+    const paths = trackPaths.current;
     const features = geojsonRef.current.features as TrainFeature[];
 
     for (let i = 0; i < features.length; i++) {
@@ -159,13 +196,28 @@ export function useTrainFeatures(
       const c = curr.get(tripId);
       if (!c) continue;
 
-      const p = prev.get(tripId);
-      if (p && fraction < 1) {
-        features[i].geometry.coordinates[0] = p[0] + (c[0] - p[0]) * fraction;
-        features[i].geometry.coordinates[1] = p[1] + (c[1] - p[1]) * fraction;
-      } else {
+      if (fraction >= 1) {
         features[i].geometry.coordinates[0] = c[0];
         features[i].geometry.coordinates[1] = c[1];
+        continue;
+      }
+
+      const p = prev.get(tripId);
+      if (!p) {
+        features[i].geometry.coordinates[0] = c[0];
+        features[i].geometry.coordinates[1] = c[1];
+        continue;
+      }
+
+      // Use track path for on-rail animation, fall back to linear interpolation
+      const path = paths.get(tripId);
+      if (path) {
+        const pos = interpolateAlongPath(path, fraction);
+        features[i].geometry.coordinates[0] = pos[0];
+        features[i].geometry.coordinates[1] = pos[1];
+      } else {
+        features[i].geometry.coordinates[0] = p[0] + (c[0] - p[0]) * fraction;
+        features[i].geometry.coordinates[1] = p[1] + (c[1] - p[1]) * fraction;
       }
     }
   }, []);
