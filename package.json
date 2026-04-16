@@ -8,6 +8,8 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint packages/*/src --ext .ts,.tsx",
+    "test": "pnpm -r --if-present test",
+    "test:e2e": "pnpm --filter @panoptrain/e2e test:e2e",
     "download-gtfs": "pnpm --filter @panoptrain/server download-gtfs"
   }
 }
