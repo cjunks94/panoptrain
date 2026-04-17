@@ -16,25 +16,25 @@ export function TripPlanner({ stops }: TripPlannerProps) {
   const fromListId = useId();
   const toListId = useId();
 
-  // Map station name -> stopId. NYC has some duplicate names across boroughs;
-  // the first match wins for v1.
-  const nameToId = useMemo(() => {
+  // Map display label -> stopId. Labels include route info for context:
+  // "Times Sq-42 St · 1 2 3 7 N Q R W S"
+  const { labelToId, labels } = useMemo(() => {
     const map = new Map<string, string>();
-    if (!stops) return map;
+    if (!stops) return { labelToId: map, labels: [] as string[] };
     for (const f of stops.features) {
       const name = f.properties.stopName;
-      if (!map.has(name)) map.set(name, f.properties.stopId);
+      const routes = (f.properties.routes as string[] | undefined) ?? [];
+      const label = routes.length > 0 ? `${name} · ${routes.join(" ")}` : name;
+      if (!map.has(label)) map.set(label, f.properties.stopId);
     }
-    return map;
+    return { labelToId: map, labels: Array.from(map.keys()).sort() };
   }, [stops]);
-
-  const stationNames = useMemo(() => Array.from(nameToId.keys()).sort(), [nameToId]);
 
   const handlePlan = async () => {
     setError(null);
     setPlan(null);
-    const fromId = nameToId.get(from);
-    const toId = nameToId.get(to);
+    const fromId = labelToId.get(from);
+    const toId = labelToId.get(to);
     if (!fromId || !toId) {
       setError("Pick stations from the dropdown");
       return;
@@ -66,10 +66,10 @@ export function TripPlanner({ stops }: TripPlannerProps) {
       </div>
 
       <datalist id={fromListId}>
-        {stationNames.map((n) => <option key={n} value={n} />)}
+        {labels.map((n) => <option key={n} value={n} />)}
       </datalist>
       <datalist id={toListId}>
-        {stationNames.map((n) => <option key={n} value={n} />)}
+        {labels.map((n) => <option key={n} value={n} />)}
       </datalist>
 
       <input

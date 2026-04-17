@@ -51,17 +51,31 @@ staticRoutes.get("/stops", (c) => {
   if (!stopsGeoJson) {
     const gtfs = loadStaticGtfs();
 
+    // Build a map of parent station -> routes that serve it
+    const routesByParent = new Map<string, Set<string>>();
+    for (const [patternKey, sequence] of Object.entries(gtfs.stopSequences)) {
+      const routeId = patternKey.split("-")[0];
+      for (const { stopId } of sequence) {
+        const platform = gtfs.stops[stopId];
+        if (!platform?.parentStation) continue;
+        if (!routesByParent.has(platform.parentStation)) {
+          routesByParent.set(platform.parentStation, new Set());
+        }
+        routesByParent.get(platform.parentStation)!.add(routeId);
+      }
+    }
+
     const features: StopFeature[] = [];
     for (const stop of Object.values(gtfs.stops)) {
-      // Only include parent stations (location_type=1 typically has no parent)
-      // For subway, stops with parent_station are platforms; we want the station
       if (stop.parentStation) continue;
 
+      const routes = Array.from(routesByParent.get(stop.stopId) ?? []).sort();
       features.push({
         type: "Feature",
         properties: {
           stopId: stop.stopId,
           stopName: stop.stopName,
+          routes,
         },
         geometry: {
           type: "Point",

@@ -53,6 +53,7 @@ export interface StopFeature {
   properties: {
     stopId: string;
     stopName: string;
+    routes?: string[];
   };
   geometry: {
     type: "Point";
