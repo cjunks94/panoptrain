@@ -1,7 +1,8 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import Map, { Source, Layer, Popup } from "react-map-gl/maplibre";
 import type { MapLayerMouseEvent, MapRef } from "react-map-gl/maplibre";
-import type { RoutesGeoJSON, StopsGeoJSON } from "@panoptrain/shared";
+import type { RoutesGeoJSON, StopsGeoJSON, TripPlan } from "@panoptrain/shared";
+import { ROUTE_INFO } from "@panoptrain/shared";
 import type { TrainInfo } from "../../hooks/useTrainFeatures.js";
 import type { GeoJSON } from "geojson";
 
@@ -44,6 +45,7 @@ interface TransitMapProps {
   trains: TrainInfo[];
   routeShapes: RoutesGeoJSON | null;
   stops: StopsGeoJSON | null;
+  planRoute: TripPlan | null;
 }
 
 interface PopupInfo {
@@ -52,7 +54,7 @@ interface PopupInfo {
   lat: number;
 }
 
-export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, stops }: TransitMapProps) {
+export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, stops, planRoute }: TransitMapProps) {
   const [popup, setPopup] = useState<PopupInfo | null>(null);
   const [iconsReady, setIconsReady] = useState(false);
   const mapRef = useRef<MapRef>(null);
@@ -93,6 +95,19 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     if (!routeShapes) return null;
     return { type: "FeatureCollection", features: routeShapes.features };
   }, [routeShapes]);
+
+  // Build GeoJSON for planned route highlight
+  const planGeoJson = useMemo<GeoJSON.FeatureCollection | null>(() => {
+    if (!planRoute) return null;
+    const features = planRoute.segments
+      .filter((s): s is Extract<typeof s, { type: "ride" }> => s.type === "ride" && s.path.length >= 2)
+      .map((s) => ({
+        type: "Feature" as const,
+        properties: { routeId: s.routeId, color: ROUTE_INFO[s.routeId]?.color ?? "#fff" },
+        geometry: { type: "LineString" as const, coordinates: s.path },
+      }));
+    return { type: "FeatureCollection", features };
+  }, [planRoute]);
 
   const handleClick = useCallback(
     (e: MapLayerMouseEvent) => {
@@ -138,6 +153,30 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
               "line-color": ["get", "color"],
               "line-width": 2.5,
               "line-opacity": 0.6,
+            }}
+          />
+        </Source>
+      )}
+
+      {/* Planned route highlight */}
+      {planGeoJson && (
+        <Source id="plan-route" type="geojson" data={planGeoJson}>
+          <Layer
+            id="plan-route-outline"
+            type="line"
+            paint={{
+              "line-color": "#ffffff",
+              "line-width": 8,
+              "line-opacity": 0.15,
+            }}
+          />
+          <Layer
+            id="plan-route-line"
+            type="line"
+            paint={{
+              "line-color": ["get", "color"],
+              "line-width": 5,
+              "line-opacity": 0.9,
             }}
           />
         </Source>

@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import "maplibre-gl/dist/maplibre-gl.css";
+import type { TripPlan } from "@panoptrain/shared";
 import { AppShell } from "./components/Layout/AppShell.js";
 import { TransitMap } from "./components/Map/TransitMap.js";
 import { FilterPanel } from "./components/Panel/FilterPanel.js";
@@ -14,6 +15,7 @@ export default function App() {
   const { visibleRoutes, toggleRoute, toggleGroup, allOn, allOff } = useLineFilter();
   const { geojsonRef, interpolateFrame, trains } = useTrainFeatures(data, visibleRoutes, routeShapes);
   const [panelOpen, setPanelOpen] = useState(true);
+  const [planRoute, setPlanRoute] = useState<TripPlan | null>(null);
 
   const togglePanel = useCallback(() => setPanelOpen((p) => !p), []);
 
@@ -25,6 +27,7 @@ export default function App() {
         trains={trains}
         routeShapes={routeShapes}
         stops={stopsGeoJson}
+        planRoute={planRoute}
       />
       <FilterPanel
         open={panelOpen}
@@ -38,6 +41,7 @@ export default function App() {
         lastUpdated={lastUpdated}
         trainCount={data?.count ?? 0}
         stops={stopsGeoJson}
+        onPlanFound={setPlanRoute}
       />
     </AppShell>
   );

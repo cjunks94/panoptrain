@@ -1,5 +1,6 @@
-import type { TripPlan, RideSegment, TransferSegment } from "@panoptrain/shared";
+import type { TripPlan, RideSegment, TransferSegment, TrainPosition } from "@panoptrain/shared";
 import type { StaticGtfsData } from "./gtfs-loader.js";
+import { getCurrentSnapshot } from "./cache.js";
 
 const AVG_SPEED_KMH = 30;
 const DWELL_MIN_PER_STOP = 0.5;
@@ -212,8 +213,9 @@ export function planTrip(
     // Collect consecutive ride edges with the same routeId
     const routeId = edge.routeId;
     const boardStopId = path[i - 1].stopId;
+    const stopIds: string[] = [boardStopId];
     let totalDistKm = 0;
-    let intermediateStops = -1; // first step doesn't count as intermediate
+    let intermediateStops = -1;
     let lastStopId = boardStopId;
     while (i < path.length) {
       const e = path[i].edge;
@@ -221,6 +223,7 @@ export function planTrip(
       totalDistKm += e.distanceKm;
       intermediateStops++;
       lastStopId = path[i].stopId;
+      stopIds.push(lastStopId);
       i++;
     }
     const rideMin = (totalDistKm / AVG_SPEED_KMH) * 60 + Math.max(0, intermediateStops) * DWELL_MIN_PER_STOP;
@@ -229,10 +232,16 @@ export function planTrip(
       routeId,
       boardAt: { stopId: boardStopId, stopName: gtfs.stops[boardStopId]?.stopName ?? boardStopId },
       alightAt: { stopId: lastStopId, stopName: gtfs.stops[lastStopId]?.stopName ?? lastStopId },
+      stops: stopIds.map((id) => ({ stopId: id, stopName: gtfs.stops[id]?.stopName ?? id })),
+      path: extractShapePath(gtfs, routeId, stopIds),
       intermediateStops: Math.max(0, intermediateStops),
       minutes: Math.round(rideMin * 10) / 10,
+      delaySeconds: null, // filled in below
     });
   }
+
+  // Overlay real-time delays from current train snapshot
+  enrichWithDelays(segments);
 
   const totalMinutes = Math.round(segments.reduce((sum, s) => sum + s.minutes, 0));
   const totalStops = segments.reduce((sum, s) => (s.type === "ride" ? sum + s.intermediateStops + 1 : sum), 0);
@@ -246,4 +255,86 @@ export function planTrip(
     transferCount,
     segments,
   };
+}
+
+/** Extract shape coordinates between the first and last stops of a ride segment. */
+function extractShapePath(
+  gtfs: StaticGtfsData,
+  routeId: string,
+  stopIds: string[],
+): [number, number][] {
+  if (stopIds.length < 2) return [];
+
+  // Find a shape that contains these stops
+  for (const trip of Object.values(gtfs.trips)) {
+    if (trip.routeId !== routeId) continue;
+    const dists = gtfs.stopDistances[trip.shapeId];
+    if (!dists) continue;
+
+    const firstDist = dists[stopIds[0]];
+    const lastDist = dists[stopIds[stopIds.length - 1]];
+    if (firstDist === undefined || lastDist === undefined) continue;
+
+    const shape = gtfs.shapes[trip.shapeId];
+    if (!shape) continue;
+
+    // Walk shape coordinates and extract those between firstDist and lastDist
+    const minDist = Math.min(firstDist, lastDist);
+    const maxDist = Math.max(firstDist, lastDist);
+    const coords: [number, number][] = [];
+    let cumDist = 0;
+
+    for (let j = 0; j < shape.coordinates.length; j++) {
+      if (j > 0) {
+        const [lon1, lat1] = shape.coordinates[j - 1];
+        const [lon2, lat2] = shape.coordinates[j];
+        const segLen = Math.sqrt((lon2 - lon1) ** 2 + (lat2 - lat1) ** 2) * 111.32; // rough km
+        cumDist += segLen;
+      }
+      if (cumDist >= minDist && cumDist <= maxDist + 0.01) {
+        coords.push(shape.coordinates[j]);
+      }
+      if (cumDist > maxDist + 0.5) break;
+    }
+
+    if (coords.length >= 2) return coords;
+  }
+
+  // Fallback: just use stop coordinates
+  return stopIds
+    .map((id) => gtfs.stops[id])
+    .filter(Boolean)
+    .map((s) => [s!.lon, s!.lat] as [number, number]);
+}
+
+/** Cross-reference ride segments with live train delays. */
+function enrichWithDelays(segments: Array<RideSegment | TransferSegment>): void {
+  const snapshot = getCurrentSnapshot();
+  if (!snapshot) return;
+
+  // Index trains by routeId for quick lookup
+  const trainsByRoute = new Map<string, TrainPosition[]>();
+  for (const t of snapshot.trains) {
+    if (t.delay === null || t.delay === 0) continue;
+    if (!trainsByRoute.has(t.routeId)) trainsByRoute.set(t.routeId, []);
+    trainsByRoute.get(t.routeId)!.push(t);
+  }
+
+  for (const seg of segments) {
+    if (seg.type !== "ride") continue;
+    const trains = trainsByRoute.get(seg.routeId);
+    if (!trains || trains.length === 0) continue;
+
+    // Find trains at/near stops in this segment
+    const segStopIds = new Set(seg.stops.map((s) => s.stopId));
+    const matchingDelays = trains
+      .filter((t) => segStopIds.has(t.currentStopId))
+      .map((t) => t.delay!);
+
+    if (matchingDelays.length > 0) {
+      seg.delaySeconds = Math.round(
+        matchingDelays.reduce((a, b) => a + b, 0) / matchingDelays.length,
+      );
+    }
+  }
 }

@@ -5,9 +5,10 @@ import { getRouteInfo } from "../../lib/colors.js";
 
 interface TripPlannerProps {
   stops: StopsGeoJSON | null;
+  onPlanFound?: (plan: TripPlan | null) => void;
 }
 
-export function TripPlanner({ stops }: TripPlannerProps) {
+export function TripPlanner({ stops, onPlanFound }: TripPlannerProps) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [plan, setPlan] = useState<TripPlan | null>(null);
@@ -47,6 +48,7 @@ export function TripPlanner({ stops }: TripPlannerProps) {
     try {
       const result = await fetchPlan(fromId, toId);
       setPlan(result);
+      onPlanFound?.(result);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -104,10 +106,18 @@ export function TripPlanner({ stops }: TripPlannerProps) {
 }
 
 function PlanResult({ plan }: { plan: TripPlan }) {
+  const totalDelay = plan.segments.reduce(
+    (sum, s) => sum + (s.type === "ride" && s.delaySeconds ? s.delaySeconds : 0), 0,
+  );
+  const adjustedMin = plan.totalMinutes + Math.round(totalDelay / 60);
+
   return (
     <div style={{ marginTop: 12 }}>
       <div style={{ fontSize: 12, color: "#aaa", marginBottom: 8 }}>
         <strong style={{ color: "#fff" }}>{plan.totalMinutes} min</strong>
+        {totalDelay > 0 && (
+          <span style={{ color: "#f87171" }}> (est. {adjustedMin} min with delays)</span>
+        )}
         {" · "}{plan.totalStops} stops
         {plan.transferCount > 0 && ` · ${plan.transferCount} transfer${plan.transferCount > 1 ? "s" : ""}`}
       </div>
@@ -119,6 +129,8 @@ function PlanResult({ plan }: { plan: TripPlan }) {
 }
 
 function SegmentRow({ segment }: { segment: TripPlan["segments"][number] }) {
+  const [expanded, setExpanded] = useState(false);
+
   if (segment.type === "transfer") {
     return (
       <div style={{ fontSize: 11, color: "#888", padding: "4px 0 4px 12px", fontStyle: "italic" }}>
@@ -127,32 +139,72 @@ function SegmentRow({ segment }: { segment: TripPlan["segments"][number] }) {
     );
   }
   const info = getRouteInfo(segment.routeId);
+  const delayMin = segment.delaySeconds ? Math.round(segment.delaySeconds / 60) : 0;
+
   return (
-    <div style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "6px 0" }}>
-      <span
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          width: 22,
-          height: 22,
-          borderRadius: info.isExpress ? 4 : "50%",
-          background: info.color,
-          color: info.textColor,
-          fontWeight: 700,
-          fontSize: 11,
-          flexShrink: 0,
-          marginTop: 2,
-        }}
-      >
-        {segment.routeId}
-      </span>
-      <div style={{ fontSize: 12, color: "#ddd", lineHeight: 1.4 }}>
-        <div>{segment.boardAt.stopName} → {segment.alightAt.stopName}</div>
-        <div style={{ color: "#888", fontSize: 11 }}>
-          {segment.minutes} min · {segment.intermediateStops + 1} stop{segment.intermediateStops === 0 ? "" : "s"}
+    <div style={{ padding: "6px 0" }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 22,
+            height: 22,
+            borderRadius: info.isExpress ? 4 : "50%",
+            background: info.color,
+            color: info.textColor,
+            fontWeight: 700,
+            fontSize: 11,
+            flexShrink: 0,
+            marginTop: 2,
+          }}
+        >
+          {segment.routeId}
+        </span>
+        <div style={{ fontSize: 12, color: "#ddd", lineHeight: 1.4, flex: 1 }}>
+          <div>{segment.boardAt.stopName} → {segment.alightAt.stopName}</div>
+          <div style={{ color: "#888", fontSize: 11, display: "flex", gap: 6, alignItems: "center" }}>
+            <span>{segment.minutes} min · {segment.intermediateStops + 1} stop{segment.intermediateStops === 0 ? "" : "s"}</span>
+            {delayMin > 0 && (
+              <span style={{ color: "#f87171", fontWeight: 600 }}>+{delayMin} min late</span>
+            )}
+            {delayMin === 0 && segment.delaySeconds !== null && (
+              <span style={{ color: "#22c55e", fontWeight: 600 }}>On time</span>
+            )}
+          </div>
+          {segment.stops.length > 2 && (
+            <button
+              onClick={() => setExpanded((e) => !e)}
+              style={{
+                background: "none",
+                border: "none",
+                color: "#666",
+                cursor: "pointer",
+                fontSize: 10,
+                padding: "2px 0",
+                fontFamily: "inherit",
+              }}
+            >
+              {expanded ? "▾ Hide stops" : `▸ Show ${segment.stops.length} stops`}
+            </button>
+          )}
         </div>
       </div>
+      {expanded && (
+        <div style={{ marginLeft: 30, borderLeft: `2px solid ${info.color}`, paddingLeft: 10, marginTop: 4 }}>
+          {segment.stops.map((s, j) => (
+            <div key={s.stopId} style={{
+              fontSize: 11,
+              color: j === 0 || j === segment.stops.length - 1 ? "#ccc" : "#777",
+              padding: "1px 0",
+              fontWeight: j === 0 || j === segment.stops.length - 1 ? 600 : 400,
+            }}>
+              {"●"} {s.stopName}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

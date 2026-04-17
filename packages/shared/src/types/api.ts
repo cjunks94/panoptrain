@@ -76,8 +76,11 @@ export interface RideSegment {
   routeId: string;
   boardAt: { stopId: string; stopName: string };
   alightAt: { stopId: string; stopName: string };
+  stops: Array<{ stopId: string; stopName: string }>;
+  path: [number, number][];
   intermediateStops: number;
   minutes: number;
+  delaySeconds: number | null;
 }
 
 export interface TransferSegment {
