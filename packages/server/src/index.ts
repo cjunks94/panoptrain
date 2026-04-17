@@ -1,6 +1,9 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { join, extname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { loadStaticGtfs } from "./services/gtfs-loader.js";
 import { startPolling } from "./services/mta-poller.js";
 import trains from "./routes/trains.js";
@@ -23,6 +26,37 @@ app.get("/api/health", (c) => c.json({ status: "ok", uptime: process.uptime() })
 app.route("/api/trains", trains);
 app.route("/api/plan", plan);
 app.route("/api", staticRoutes);
+
+// In production, serve the built client files
+const clientDist = join(fileURLToPath(import.meta.url), "../../../client/dist");
+if (existsSync(join(clientDist, "index.html"))) {
+  const indexHtml = readFileSync(join(clientDist, "index.html"), "utf-8");
+  const mimeTypes: Record<string, string> = {
+    ".js": "application/javascript",
+    ".css": "text/css",
+    ".html": "text/html",
+    ".json": "application/json",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".ico": "image/x-icon",
+    ".woff2": "font/woff2",
+  };
+
+  app.get("*", (c) => {
+    // Try to serve the static file
+    const filePath = join(clientDist, c.req.path);
+    if (existsSync(filePath) && statSync(filePath).isFile()) {
+      const ext = extname(filePath);
+      const mime = mimeTypes[ext] ?? "application/octet-stream";
+      c.header("Content-Type", mime);
+      c.header("Cache-Control", ext === ".html" ? "no-cache" : "public, max-age=31536000, immutable");
+      return c.body(readFileSync(filePath));
+    }
+    // SPA fallback
+    return c.html(indexHtml);
+  });
+  console.log("Serving client from", clientDist);
+}
 
 // Load static GTFS data and start polling
 try {

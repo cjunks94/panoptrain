@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "download-gtfs": "tsx scripts/download-gtfs.ts",

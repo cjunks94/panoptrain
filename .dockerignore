@@ -1,0 +1,10 @@
+node_modules
+dist
+.git
+.env
+*.tsbuildinfo
+packages/e2e
+packages/server/src/data/gtfs/*.json
+.github
+.vscode
+.idea
