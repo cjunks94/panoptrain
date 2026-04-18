@@ -74,7 +74,7 @@ jobs:
           fi
 
       - name: Install Playwright browsers
-        run: pnpm --filter @panoptrain/e2e exec playwright install --with-deps chromium
+        run: pnpm --filter @panoptrain/e2e exec playwright install --with-deps chromium webkit
 
       - run: pnpm test:e2e
 
