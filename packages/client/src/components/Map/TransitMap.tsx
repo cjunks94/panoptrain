@@ -185,57 +185,130 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
       {/* Stations */}
       {stops && (
         <Source id="stops" type="geojson" data={stops}>
+          {/* Station markers — radius scales with serving-route count so
+              major hubs stand out. Every dot gets a dark halo so the white
+              core punches through against colored route lines beneath. */}
           <Layer
             id="station-dots"
             type="circle"
             paint={{
               "circle-radius": [
                 "interpolate", ["linear"], ["zoom"],
-                11, 1.5,
-                14, 4,
-                16, 6,
+                11, [
+                  "case",
+                  [">=", ["get", "routeCount"], 8], 4,
+                  [">=", ["get", "routeCount"], 4], 2.5,
+                  2,
+                ],
+                14, [
+                  "case",
+                  [">=", ["get", "routeCount"], 8], 7,
+                  [">=", ["get", "routeCount"], 4], 5,
+                  4,
+                ],
+                16, [
+                  "case",
+                  [">=", ["get", "routeCount"], 8], 9,
+                  [">=", ["get", "routeCount"], 4], 7,
+                  6,
+                ],
               ],
               "circle-color": "#ffffff",
               "circle-opacity": [
                 "interpolate", ["linear"], ["zoom"],
-                11, 0.3,
-                13, 0.6,
-                15, 0.9,
+                11, 0.85,
+                13, 1,
               ],
               "circle-stroke-width": [
                 "interpolate", ["linear"], ["zoom"],
-                11, 0,
-                14, 1,
+                11, [
+                  "case",
+                  [">=", ["get", "routeCount"], 8], 2,
+                  [">=", ["get", "routeCount"], 4], 1.5,
+                  1,
+                ],
+                14, [
+                  "case",
+                  [">=", ["get", "routeCount"], 8], 2.5,
+                  [">=", ["get", "routeCount"], 4], 1.8,
+                  1.2,
+                ],
               ],
-              "circle-stroke-color": "#999",
-              "circle-stroke-opacity": 0.5,
+              // Dark halo for normal stations (separates from colored routes);
+              // bright halo for hubs to make them visually "premium".
+              "circle-stroke-color": [
+                "case",
+                [">=", ["get", "routeCount"], 8], "#ffffff",
+                "#0a0a1a",
+              ],
+              "circle-stroke-opacity": 1,
             }}
             minzoom={11}
           />
+
+          {/* Major-hub labels — shown earlier so the map is readable at
+              default zoom. Filters in only stations with 4+ routes to avoid
+              cluttering Brooklyn / outer borough density. */}
           <Layer
-            id="station-labels"
+            id="station-labels-major"
             type="symbol"
-            minzoom={14}
+            minzoom={12}
+            maxzoom={14}
+            filter={[">=", ["get", "routeCount"], 4]}
             layout={{
               "text-field": ["get", "stopName"],
               "text-size": [
                 "interpolate", ["linear"], ["zoom"],
-                14, 10,
-                16, 13,
+                12, 9,
+                14, 11,
               ],
               "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
-              "text-offset": [0, 1.2],
+              "text-offset": [0, 1.0],
               "text-anchor": "top",
               "text-max-width": 8,
               "text-optional": true,
+              "symbol-sort-key": ["-", 0, ["get", "routeCount"]],
             }}
             paint={{
-              "text-color": "#ccc",
+              "text-color": "#d8d8e0",
               "text-halo-color": "#1a1a2e",
               "text-halo-width": 1.5,
               "text-opacity": [
                 "interpolate", ["linear"], ["zoom"],
-                14, 0.6,
+                12, 0.5,
+                14, 0.85,
+              ],
+            }}
+          />
+
+          {/* Detailed labels — at zoom 14+, every station shows its name plus
+              the routes serving it (PT-203). Sorted by routeCount so hubs win
+              collision contests. */}
+          <Layer
+            id="station-labels-detailed"
+            type="symbol"
+            minzoom={14}
+            layout={{
+              "text-field": ["get", "labelText"],
+              "text-size": [
+                "interpolate", ["linear"], ["zoom"],
+                14, 10,
+                16, 12,
+              ],
+              "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
+              "text-offset": [0, 1.2],
+              "text-anchor": "top",
+              "text-max-width": 10,
+              "text-optional": true,
+              "symbol-sort-key": ["-", 0, ["get", "routeCount"]],
+            }}
+            paint={{
+              "text-color": "#d8d8e0",
+              "text-halo-color": "#1a1a2e",
+              "text-halo-width": 1.5,
+              "text-opacity": [
+                "interpolate", ["linear"], ["zoom"],
+                14, 0.7,
                 16, 1,
               ],
             }}

@@ -96,3 +96,4 @@ Goal: planner returns multiple route options and surfaces real-time delay contex
 | PT-306 | P2 | Service alerts integration | Pull GTFS-RT alerts feed; flag segments under planned/active maintenance. |
 | PT-307 | P2 | Smarter transfer time | Replace constant `TRANSFER_MIN = 1` with per-station heuristic based on platform geometry. |
 | PT-308 | P2 | Flexible departure window | Show "leave now vs. in 5/10 min" impact based on next train ETAs. |
+| PT-309 | P1 | Spotlight trains on selected trip | When a plan is active, highlight the live trains running the planned routes (e.g. brighten matching, dim others) and ensure the planned rail segments stay visually emphasized. Filter the train snapshot by `routeId` for each ride segment and surface ETA from the closest train to the boarding stop. |
