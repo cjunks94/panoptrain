@@ -61,14 +61,21 @@ export interface StopFeature {
   };
 }
 
-/** Trip planner response from GET /api/plan */
+/** A single planned trip — one of potentially multiple alternatives. */
 export interface TripPlan {
+  /** Human-readable label, e.g. "Recommended" or "Avoids Q". */
+  label: string;
   from: { stopId: string; stopName: string };
   to: { stopId: string; stopName: string };
   totalMinutes: number;
   totalStops: number;
   transferCount: number;
   segments: Array<RideSegment | TransferSegment>;
+}
+
+/** Response from GET /api/plan — primary plan first, then alternatives. */
+export interface PlanResponse {
+  plans: TripPlan[];
 }
 
 export interface RideSegment {

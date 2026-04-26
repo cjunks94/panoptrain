@@ -11,44 +11,71 @@ interface TripPlannerProps {
 export function TripPlanner({ stops, onPlanFound }: TripPlannerProps) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  const [plan, setPlan] = useState<TripPlan | null>(null);
+  const [plans, setPlans] = useState<TripPlan[]>([]);
+  const [activeIdx, setActiveIdx] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fromListId = useId();
   const toListId = useId();
 
-  // Map display label -> stopId. Labels include route info for context:
-  // "Times Sq-42 St · 1 2 3 7 N Q R W S"
-  const { labelToId, labels } = useMemo(() => {
-    const map = new Map<string, string>();
-    if (!stops) return { labelToId: map, labels: [] as string[] };
+  // NYC complex stations like "Times Sq-42 St" appear as multiple parent stops
+  // in GTFS, one per platform group (1/2/3, 7, S, N/Q/R/W). We surface two
+  // levels of choice in the dropdown:
+  //   - broad: just "Times Sq-42 St" -> searches from all parents (no transfer
+  //     penalty for picking the right starting platform)
+  //   - sub:   "Times Sq-42 St · 1 2 3" -> constrained to that platform group
+  // Each label resolves to one or more parent stop IDs. The broad entry sorts
+  // first because it has no " ·" suffix.
+  const { labelToIds, labels } = useMemo(() => {
+    const map = new Map<string, string[]>();
+    if (!stops) return { labelToIds: map, labels: [] as string[] };
+
+    const byName = new Map<string, { id: string; routes: string[] }[]>();
     for (const f of stops.features) {
       const name = f.properties.stopName;
       const routes = (f.properties.routes as string[] | undefined) ?? [];
-      const label = routes.length > 0 ? `${name} · ${routes.join(" ")}` : name;
-      if (!map.has(label)) map.set(label, f.properties.stopId);
+      if (!byName.has(name)) byName.set(name, []);
+      byName.get(name)!.push({ id: f.properties.stopId, routes });
     }
-    return { labelToId: map, labels: Array.from(map.keys()).sort() };
+
+    for (const [name, entries] of byName.entries()) {
+      if (entries.length > 1) {
+        map.set(name, entries.map((e) => e.id));
+        for (const e of entries) {
+          const subLabel = e.routes.length > 0 ? `${name} · ${e.routes.join(" ")}` : name;
+          if (!map.has(subLabel)) map.set(subLabel, [e.id]);
+        }
+      } else {
+        const e = entries[0];
+        const label = e.routes.length > 0 ? `${name} · ${e.routes.join(" ")}` : name;
+        if (!map.has(label)) map.set(label, [e.id]);
+      }
+    }
+
+    return { labelToIds: map, labels: Array.from(map.keys()).sort() };
   }, [stops]);
 
   const handlePlan = async () => {
     setError(null);
-    setPlan(null);
-    const fromId = labelToId.get(from);
-    const toId = labelToId.get(to);
-    if (!fromId || !toId) {
+    setPlans([]);
+    setActiveIdx(0);
+    onPlanFound?.(null);
+    const fromIds = labelToIds.get(from);
+    const toIds = labelToIds.get(to);
+    if (!fromIds || !toIds) {
       setError("Pick stations from the dropdown");
       return;
     }
-    if (fromId === toId) {
+    if (from === to) {
       setError("Pick two different stations");
       return;
     }
     setLoading(true);
     try {
-      const result = await fetchPlan(fromId, toId);
-      setPlan(result);
-      onPlanFound?.(result);
+      const result = await fetchPlan(fromIds, toIds);
+      setPlans(result.plans);
+      setActiveIdx(0);
+      onPlanFound?.(result.plans[0] ?? null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -56,10 +83,17 @@ export function TripPlanner({ stops, onPlanFound }: TripPlannerProps) {
     }
   };
 
+  const selectPlan = (idx: number) => {
+    setActiveIdx(idx);
+    onPlanFound?.(plans[idx] ?? null);
+  };
+
   const swap = () => {
     setFrom(to);
     setTo(from);
   };
+
+  const activePlan = plans[activeIdx] ?? null;
 
   return (
     <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
@@ -100,7 +134,26 @@ export function TripPlanner({ stops, onPlanFound }: TripPlannerProps) {
         <div style={{ marginTop: 8, color: "#f87171", fontSize: 12 }}>{error}</div>
       )}
 
-      {plan && <PlanResult plan={plan} />}
+      {plans.length > 1 && (
+        <div style={{ display: "flex", gap: 4, marginTop: 10, flexWrap: "wrap" }}>
+          {plans.map((p, i) => (
+            <button
+              key={i}
+              onClick={() => selectPlan(i)}
+              style={{
+                ...tabBtnStyle,
+                background: i === activeIdx ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.04)",
+                borderColor: i === activeIdx ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.08)",
+                color: i === activeIdx ? "#fff" : "#aaa",
+              }}
+            >
+              {p.label} · {p.totalMinutes}m
+            </button>
+          ))}
+        </div>
+      )}
+
+      {activePlan && <PlanResult plan={activePlan} />}
     </div>
   );
 }
@@ -243,4 +296,14 @@ const findBtnStyle: React.CSSProperties = {
   cursor: "pointer",
   fontSize: 12,
   fontWeight: 500,
+};
+
+const tabBtnStyle: React.CSSProperties = {
+  padding: "4px 8px",
+  border: "1px solid",
+  borderRadius: 12,
+  fontSize: 11,
+  fontWeight: 500,
+  fontFamily: "inherit",
+  cursor: "pointer",
 };

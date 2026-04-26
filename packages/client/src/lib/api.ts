@@ -1,4 +1,4 @@
-import type { TrainsResponse, RoutesGeoJSON, StopsGeoJSON, TripPlan } from "@panoptrain/shared";
+import type { TrainsResponse, RoutesGeoJSON, StopsGeoJSON, PlanResponse } from "@panoptrain/shared";
 
 const BASE = "/api";
 
@@ -24,6 +24,8 @@ export function fetchStops(): Promise<StopsGeoJSON> {
   return fetchJson<StopsGeoJSON>("/stops");
 }
 
-export function fetchPlan(fromId: string, toId: string): Promise<TripPlan> {
-  return fetchJson<TripPlan>(`/plan?from=${encodeURIComponent(fromId)}&to=${encodeURIComponent(toId)}`);
+export function fetchPlan(fromIds: string[], toIds: string[]): Promise<PlanResponse> {
+  const from = encodeURIComponent(fromIds.join(","));
+  const to = encodeURIComponent(toIds.join(","));
+  return fetchJson<PlanResponse>(`/plan?from=${from}&to=${to}`);
 }

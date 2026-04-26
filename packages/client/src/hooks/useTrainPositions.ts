@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import type { TrainsResponse } from "@panoptrain/shared";
 import { fetchTrains } from "../lib/api.js";
 
+// Injected by vite.config.ts from the repo-root POLL_INTERVAL_MS env var so
+// this stays in lockstep with the server's polling cadence.
 const POLL_INTERVAL = parseInt(import.meta.env.VITE_POLL_INTERVAL_MS ?? "30000", 10);
 const STALE_THRESHOLD = 90_000; // 90 seconds
 

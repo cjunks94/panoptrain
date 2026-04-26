@@ -116,25 +116,58 @@ function stateKey(stopId: string, routeId: string | null): string {
   return `${stopId}|${routeId ?? ""}`;
 }
 
+export interface PlanOptions {
+  /** Route IDs to forbid for ride edges. Used to generate alternatives. */
+  excludeRoutes?: ReadonlySet<string>;
+  /** Specific ride edges to forbid, keyed as `fromStopId|toStopId|routeId`.
+   *  Used by `planTrips` to force deviation from the primary path. */
+  excludeRideEdges?: ReadonlySet<string>;
+  /** Label for the resulting plan — surfaced in the UI. */
+  label?: string;
+}
+
+/** Encode a ride edge as a stable string key. */
+function rideEdgeKey(fromStopId: string, toStopId: string, routeId: string): string {
+  return `${fromStopId}|${toStopId}|${routeId}`;
+}
+
 /**
  * Plan a trip from one parent station to another.
  * Dijkstra over (stopId, currentRouteId) states. Switching trains at the same
  * stop counts as an implicit transfer to discourage spurious route changes.
+ *
+ * `fromId` / `toId` accept either a single parent stop ID or an array — pass
+ * an array to start/end from any of several same-name parents (NYC complex
+ * stations like Times Sq, Atlantic, Union Sq are split across multiple parent
+ * stops in GTFS). All sources start with cost 0.
+ *
+ * Pass `excludeRoutes` to forbid specific routes — used by `planTrips` to
+ * generate alternative paths that avoid a given line.
  */
 export function planTrip(
   graph: StationGraph,
   gtfs: StaticGtfsData,
-  fromId: string,
-  toId: string,
+  fromId: string | string[],
+  toId: string | string[],
+  options: PlanOptions = {},
 ): TripPlan | null {
-  const fromStop = gtfs.stops[fromId];
-  const toStop = gtfs.stops[toId];
-  if (!fromStop || !toStop) return null;
-  if (fromId === toId) return null;
+  const fromIds = (Array.isArray(fromId) ? fromId : [fromId]).filter((id) => gtfs.stops[id]);
+  const toIds = (Array.isArray(toId) ? toId : [toId]).filter((id) => gtfs.stops[id]);
+  if (fromIds.length === 0 || toIds.length === 0) return null;
 
-  const sources = resolvePlatforms(graph, fromId, gtfs);
-  const targetSet = new Set(resolvePlatforms(graph, toId, gtfs));
+  const fromStop = gtfs.stops[fromIds[0]];
+  const toStop = gtfs.stops[toIds[0]];
+
+  const sources: string[] = [];
+  for (const id of fromIds) sources.push(...resolvePlatforms(graph, id, gtfs));
+  const targetSet = new Set<string>();
+  for (const id of toIds) for (const p of resolvePlatforms(graph, id, gtfs)) targetSet.add(p);
   if (sources.length === 0 || targetSet.size === 0) return null;
+  // Reject if from/to overlap (e.g. user picked the same broad station for both)
+  if (sources.some((s) => targetSet.has(s))) return null;
+
+  const excludeRoutes = options.excludeRoutes ?? new Set<string>();
+  const excludeRideEdges = options.excludeRideEdges ?? new Set<string>();
 
   // Dijkstra over states: stateKey → cost; steps map for reconstruction
   const dist = new Map<string, number>();
@@ -166,6 +199,8 @@ export function planTrip(
       let weight: number;
       let nextRoute: string | null;
       if (edge.type === "ride") {
+        if (excludeRoutes.has(edge.routeId)) continue;
+        if (excludeRideEdges.has(rideEdgeKey(stopId, edge.to, edge.routeId))) continue;
         // Same route = cheap continuation; different route = implicit transfer
         weight = route === edge.routeId ? 1 : 1 + TRANSFER_PENALTY;
         nextRoute = edge.routeId;
@@ -248,13 +283,112 @@ export function planTrip(
   const transferCount = segments.filter((s) => s.type === "transfer").length;
 
   return {
-    from: { stopId: fromId, stopName: fromStop.stopName },
-    to: { stopId: toId, stopName: toStop.stopName },
+    label: options.label ?? "Recommended",
+    from: { stopId: fromIds[0], stopName: fromStop.stopName },
+    to: { stopId: toIds[0], stopName: toStop.stopName },
     totalMinutes,
     totalStops,
     transferCount,
     segments,
   };
+}
+
+/** Routes used by ride segments, in order of first appearance. */
+function routesUsedIn(plan: TripPlan): string[] {
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  for (const seg of plan.segments) {
+    if (seg.type === "ride" && !seen.has(seg.routeId)) {
+      seen.add(seg.routeId);
+      ordered.push(seg.routeId);
+    }
+  }
+  return ordered;
+}
+
+/** Two plans are "essentially the same" if they use the same set of routes
+ *  and board/alight at the same stops in the same order. */
+function plansEquivalent(a: TripPlan, b: TripPlan): boolean {
+  const aRides = a.segments.filter((s): s is Extract<TripPlan["segments"][number], { type: "ride" }> => s.type === "ride");
+  const bRides = b.segments.filter((s): s is Extract<TripPlan["segments"][number], { type: "ride" }> => s.type === "ride");
+  if (aRides.length !== bRides.length) return false;
+  for (let i = 0; i < aRides.length; i++) {
+    if (aRides[i].routeId !== bRides[i].routeId) return false;
+    if (aRides[i].boardAt.stopId !== bRides[i].boardAt.stopId) return false;
+    if (aRides[i].alightAt.stopId !== bRides[i].alightAt.stopId) return false;
+  }
+  return true;
+}
+
+/** Collect every consecutive (from, to, routeId) ride edge along a plan's path. */
+function rideEdgesIn(plan: TripPlan): { from: string; to: string; routeId: string }[] {
+  const edges: { from: string; to: string; routeId: string }[] = [];
+  for (const seg of plan.segments) {
+    if (seg.type !== "ride") continue;
+    for (let i = 0; i < seg.stops.length - 1; i++) {
+      edges.push({ from: seg.stops[i].stopId, to: seg.stops[i + 1].stopId, routeId: seg.routeId });
+    }
+  }
+  return edges;
+}
+
+/**
+ * Plan a trip and return up to `k` distinct options: a primary plus
+ * alternatives.
+ *
+ * Two strategies, in order:
+ *   1. Route exclusion — forbid each route used in primary; cheap "what if
+ *      the X line is bad" alternatives that often produce the cleanest UX.
+ *   2. Edge-deviation (Yen-style) — forbid one ride edge from the primary
+ *      path at a time. Guarantees we surface a slower alternative even when
+ *      route exclusion converges to the same path (e.g. Times Sq → Delancey
+ *      where the F is the only sensible option).
+ *
+ * Plans are deduped by route+stop signature.
+ */
+export function planTrips(
+  graph: StationGraph,
+  gtfs: StaticGtfsData,
+  fromId: string | string[],
+  toId: string | string[],
+  k: number = 3,
+): TripPlan[] {
+  const primary = planTrip(graph, gtfs, fromId, toId, { label: "Recommended" });
+  if (!primary) return [];
+
+  const plans: TripPlan[] = [primary];
+
+  // Strategy 1: route exclusion
+  for (const route of routesUsedIn(primary)) {
+    if (plans.length >= k) break;
+    const alt = planTrip(graph, gtfs, fromId, toId, {
+      excludeRoutes: new Set([route]),
+      label: `Avoids ${route}`,
+    });
+    if (!alt) continue;
+    if (plans.some((p) => plansEquivalent(p, alt))) continue;
+    plans.push(alt);
+  }
+
+  // Strategy 2: edge-deviation — forbid one primary edge at a time. This
+  // produces strictly different paths (some slower) when route exclusion
+  // didn't yield enough variety.
+  if (plans.length < k) {
+    let altIdx = plans.length; // 1-based index past primary
+    for (const edge of rideEdgesIn(primary)) {
+      if (plans.length >= k) break;
+      const alt = planTrip(graph, gtfs, fromId, toId, {
+        excludeRideEdges: new Set([rideEdgeKey(edge.from, edge.to, edge.routeId)]),
+        label: `Alternative ${altIdx}`,
+      });
+      if (!alt) continue;
+      if (plans.some((p) => plansEquivalent(p, alt))) continue;
+      plans.push(alt);
+      altIdx++;
+    }
+  }
+
+  return plans;
 }
 
 /** Extract shape coordinates between the first and last stops of a ride segment. */
