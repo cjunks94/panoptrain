@@ -7,6 +7,10 @@ const trains = new Hono();
 trains.get("/", (c) => {
   const snapshot = getCurrentSnapshot();
 
+  // Snapshot only refreshes once per poll cycle — let intermediaries reuse it
+  // for a few seconds. Short TTL keeps perceived freshness near-real-time.
+  c.header("Cache-Control", "public, max-age=5");
+
   if (!snapshot) {
     return c.json({ timestamp: 0, count: 0, trains: [] } satisfies TrainsResponse);
   }

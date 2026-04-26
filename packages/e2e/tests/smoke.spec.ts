@@ -72,11 +72,14 @@ test.describe("Panoptrain — happy path", () => {
     await expect(page.getByRole("button", { name: "Find Route" })).toBeVisible();
   });
 
-  test("plan API returns a valid plan", async ({ request }) => {
+  test("plan API returns at least a primary plan", async ({ request }) => {
     const res = await request.get("http://localhost:3001/api/plan?from=127&to=132");
     expect(res.status()).toBe(200);
     const body = await res.json();
-    expect(body.from.stopId).toBe("127");
-    expect(body.segments.length).toBeGreaterThan(0);
+    expect(Array.isArray(body.plans)).toBe(true);
+    expect(body.plans.length).toBeGreaterThan(0);
+    expect(body.plans[0].from.stopId).toBe("127");
+    expect(body.plans[0].label).toBe("Recommended");
+    expect(body.plans[0].segments.length).toBeGreaterThan(0);
   });
 });

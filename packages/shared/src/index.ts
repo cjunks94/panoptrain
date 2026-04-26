@@ -8,6 +8,7 @@ export type {
   StopsGeoJSON,
   StopFeature,
   TripPlan,
+  PlanResponse,
   RideSegment,
   TransferSegment,
 } from "./types/api.js";
