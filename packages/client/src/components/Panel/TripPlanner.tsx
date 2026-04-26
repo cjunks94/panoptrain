@@ -347,20 +347,22 @@ const swapBtnStyle: React.CSSProperties = {
 const findBtnStyle: React.CSSProperties = {
   width: "100%",
   marginTop: 8,
-  padding: "6px",
+  minHeight: 44,
+  padding: "0 12px",
   background: "rgba(255,255,255,0.1)",
   border: "1px solid rgba(255,255,255,0.15)",
   borderRadius: 6,
   color: "#fff",
   cursor: "pointer",
-  fontSize: 12,
+  fontSize: 13,
   fontWeight: 500,
 };
 
 const tabBtnStyle: React.CSSProperties = {
-  padding: "4px 8px",
+  minHeight: 32,
+  padding: "6px 10px",
   border: "1px solid",
-  borderRadius: 12,
+  borderRadius: 14,
   fontSize: 11,
   fontWeight: 500,
   fontFamily: "inherit",
