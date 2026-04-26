@@ -46,6 +46,8 @@ interface TransitMapProps {
   routeShapes: RoutesGeoJSON | null;
   stops: StopsGeoJSON | null;
   planRoute: TripPlan | null;
+  /** When set, hide all non-plan route lines and pulse the plan outline. */
+  planRouteIds: Set<string> | null;
 }
 
 interface PopupInfo {
@@ -54,7 +56,7 @@ interface PopupInfo {
   lat: number;
 }
 
-export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, stops, planRoute }: TransitMapProps) {
+export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, stops, planRoute, planRouteIds }: TransitMapProps) {
   const [popup, setPopup] = useState<PopupInfo | null>(null);
   const [iconsReady, setIconsReady] = useState(false);
   const mapRef = useRef<MapRef>(null);
@@ -90,22 +92,156 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     setIconsReady(true);
   }, []);
 
+  // Auto-fit the viewport to the planned route so users immediately see the
+  // whole trip — fixes the case where one segment goes off-screen (e.g. an
+  // L-line ride heading east into Brooklyn while the user is zoomed on
+  // Manhattan). Padded for the left filter panel.
+  useEffect(() => {
+    if (!planRoute) return;
+    const map = mapRef.current?.getMap();
+    if (!map) return;
+    let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
+    for (const seg of planRoute.segments) {
+      if (seg.type !== "ride") continue;
+      for (const [lon, lat] of seg.path) {
+        if (lon < minLon) minLon = lon;
+        if (lon > maxLon) maxLon = lon;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+      }
+    }
+    if (minLon === Infinity) return;
+    map.fitBounds([[minLon, minLat], [maxLon, maxLat]], {
+      padding: { top: 80, bottom: 80, left: 320, right: 80 },
+      duration: 800,
+      maxZoom: 14,
+    });
+  }, [planRoute]);
+
+  // Pulse the plan-route-outline AND the plan-stop halos in lockstep when a
+  // plan is active. Uses a sine wave on opacity + size so the white halo
+  // "breathes". No-op when there's no plan; unsubscribes cleanly on change.
+  useEffect(() => {
+    if (!planRoute) return;
+    const map = mapRef.current?.getMap();
+    if (!map) return;
+    let rafId = 0;
+    const start = performance.now();
+    const tick = () => {
+      const t = (performance.now() - start) / 1000;
+      const phase = (Math.sin(t * 1.8) + 1) / 2; // 0..1
+
+      // Wide blurry outer halo
+      const outerOpacity = 0.30 + 0.35 * phase; // 0.30..0.65
+      const outerWidth = 16 + 8 * phase;        // 16..24
+      if (map.getLayer("plan-route-outline")) {
+        map.setPaintProperty("plan-route-outline", "line-opacity", outerOpacity);
+        map.setPaintProperty("plan-route-outline", "line-width", outerWidth);
+      }
+
+      // Station halos — slightly stronger pulse so they stand out from line
+      const stopOpacity = 0.25 + 0.40 * phase;       // 0.25..0.65
+      const stopRadiusBase = 14 + 8 * phase;         // 14..22  (start/end)
+      const stopRadiusTransfer = 10 + 6 * phase;     // 10..16  (transfer)
+      if (map.getLayer("plan-stops-glow")) {
+        map.setPaintProperty("plan-stops-glow", "circle-opacity", stopOpacity);
+        map.setPaintProperty("plan-stops-glow", "circle-radius", [
+          "match",
+          ["get", "kind"],
+          "transfer", stopRadiusTransfer,
+          stopRadiusBase,
+        ]);
+      }
+
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [planRoute]);
+
   // Route shapes are always visible — toggles only control train visibility
   const allShapes = useMemo<GeoJSON.FeatureCollection | null>(() => {
     if (!routeShapes) return null;
     return { type: "FeatureCollection", features: routeShapes.features };
   }, [routeShapes]);
 
-  // Build GeoJSON for planned route highlight
+  // Build GeoJSON for planned route highlight. Each ride becomes a colored
+  // line; between consecutive rides we add a short white "transfer connector"
+  // that bridges the geometric gap where two perpendicular subway lines meet
+  // at a transfer station (e.g. N going south meeting L going east at
+  // 14 St-Union Sq). Without this the user sees a visual gap at every
+  // transfer.
   const planGeoJson = useMemo<GeoJSON.FeatureCollection | null>(() => {
     if (!planRoute) return null;
-    const features = planRoute.segments
-      .filter((s): s is Extract<typeof s, { type: "ride" }> => s.type === "ride" && s.path.length >= 2)
-      .map((s) => ({
-        type: "Feature" as const,
-        properties: { routeId: s.routeId, color: ROUTE_INFO[s.routeId]?.color ?? "#fff" },
-        geometry: { type: "LineString" as const, coordinates: s.path },
-      }));
+    const rides = planRoute.segments.filter(
+      (s): s is Extract<typeof s, { type: "ride" }> => s.type === "ride" && s.path.length >= 2,
+    );
+    if (rides.length === 0) return null;
+
+    const features: GeoJSON.Feature[] = [];
+    for (let i = 0; i < rides.length; i++) {
+      const r = rides[i];
+      features.push({
+        type: "Feature",
+        properties: {
+          routeId: r.routeId,
+          color: ROUTE_INFO[r.routeId]?.color ?? "#fff",
+          isTransfer: false,
+        },
+        geometry: { type: "LineString", coordinates: r.path },
+      });
+      if (i < rides.length - 1) {
+        const next = rides[i + 1];
+        features.push({
+          type: "Feature",
+          properties: { routeId: "transfer", color: "#ffffff", isTransfer: true },
+          geometry: {
+            type: "LineString",
+            coordinates: [r.path[r.path.length - 1], next.path[0]],
+          },
+        });
+      }
+    }
+    return { type: "FeatureCollection", features };
+  }, [planRoute]);
+
+  // Plan key stations: start (first ride's board), end (last ride's alight),
+  // transfers (each boundary between consecutive ride segments). We pull
+  // coordinates straight from each segment's path geometry instead of looking
+  // up by stopId — segments use platform-level IDs (e.g. "127S") which the
+  // /api/stops payload (parent stops only) doesn't include.
+  const planStopsGeoJson = useMemo<GeoJSON.FeatureCollection | null>(() => {
+    if (!planRoute) return null;
+    const rides = planRoute.segments.filter(
+      (s): s is Extract<typeof s, { type: "ride" }> => s.type === "ride" && s.path.length >= 2,
+    );
+    if (rides.length === 0) return null;
+
+    const features: GeoJSON.Feature[] = [];
+    const firstRide = rides[0];
+    const lastRide = rides[rides.length - 1];
+
+    features.push({
+      type: "Feature",
+      properties: { kind: "start", stopName: firstRide.boardAt.stopName },
+      geometry: { type: "Point", coordinates: firstRide.path[0] },
+    });
+
+    for (let i = 0; i < rides.length - 1; i++) {
+      const ride = rides[i];
+      features.push({
+        type: "Feature",
+        properties: { kind: "transfer", stopName: ride.alightAt.stopName },
+        geometry: { type: "Point", coordinates: ride.path[ride.path.length - 1] },
+      });
+    }
+
+    features.push({
+      type: "Feature",
+      properties: { kind: "end", stopName: lastRide.alightAt.stopName },
+      geometry: { type: "Point", coordinates: lastRide.path[lastRide.path.length - 1] },
+    });
+
     return { type: "FeatureCollection", features };
   }, [planRoute]);
 
@@ -143,12 +279,17 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
       onLoad={handleMapLoad}
       cursor="pointer"
     >
-      {/* Route lines */}
+      {/* Route lines — when a plan is active, hide every line that isn't on
+          one of the planned routes so the user's chosen path stands alone. */}
       {allShapes && (
         <Source id="routes" type="geojson" data={allShapes}>
           <Layer
             id="route-lines"
             type="line"
+            filter={planRouteIds
+              ? ["in", ["get", "routeId"], ["literal", Array.from(planRouteIds)]]
+              : ["literal", true]
+            }
             paint={{
               "line-color": ["get", "color"],
               "line-width": 2.5,
@@ -158,25 +299,45 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
         </Source>
       )}
 
-      {/* Planned route highlight */}
+      {/* Planned route highlight — outline + colored line. Outline pulses
+          (driven by the RAF effect above). The colored line is bumped to
+          width 6 and uses a line-cap of "round" so adjacent segments meet
+          cleanly through transfer points. */}
       {planGeoJson && (
         <Source id="plan-route" type="geojson" data={planGeoJson}>
+          {/* Wide soft white glow underneath — visible even when the route's
+              own color is low-contrast against the dark map (e.g. L grey). */}
           <Layer
             id="plan-route-outline"
             type="line"
+            layout={{ "line-cap": "round", "line-join": "round" }}
+            paint={{
+              "line-color": "#ffffff",
+              "line-width": 18,
+              "line-opacity": 0.35,
+              "line-blur": 4,
+            }}
+          />
+          {/* Inner white core — guarantees the path is readable regardless of
+              the route's color. The colored layer on top tints it. */}
+          <Layer
+            id="plan-route-core"
+            type="line"
+            layout={{ "line-cap": "round", "line-join": "round" }}
             paint={{
               "line-color": "#ffffff",
               "line-width": 8,
-              "line-opacity": 0.15,
+              "line-opacity": 0.85,
             }}
           />
           <Layer
             id="plan-route-line"
             type="line"
+            layout={{ "line-cap": "round", "line-join": "round" }}
             paint={{
               "line-color": ["get", "color"],
               "line-width": 5,
-              "line-opacity": 0.9,
+              "line-opacity": 1,
             }}
           />
         </Source>
@@ -310,6 +471,50 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
                 "interpolate", ["linear"], ["zoom"],
                 14, 0.7,
                 16, 1,
+              ],
+            }}
+          />
+        </Source>
+      )}
+
+      {/* Plan key stations — pulsing halo + solid center on the start, end,
+          and any transfer points along the active plan. Pulse params live
+          in the RAF effect above. */}
+      {planStopsGeoJson && (
+        <Source id="plan-stops" type="geojson" data={planStopsGeoJson}>
+          <Layer
+            id="plan-stops-glow"
+            type="circle"
+            paint={{
+              "circle-radius": 18,
+              "circle-color": "#ffffff",
+              "circle-opacity": 0.4,
+              "circle-blur": 0.6,
+            }}
+          />
+          <Layer
+            id="plan-stops-center"
+            type="circle"
+            paint={{
+              "circle-radius": [
+                "match",
+                ["get", "kind"],
+                "transfer", 4,
+                6,
+              ],
+              "circle-color": "#ffffff",
+              "circle-opacity": 1,
+              "circle-stroke-width": [
+                "match",
+                ["get", "kind"],
+                "transfer", 1.5,
+                2.5,
+              ],
+              "circle-stroke-color": [
+                "match",
+                ["get", "kind"],
+                "transfer", "#cbd5e1",
+                "#0a0a1a",
               ],
             }}
           />

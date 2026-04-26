@@ -78,6 +78,17 @@ export interface PlanResponse {
   plans: TripPlan[];
 }
 
+/** Live-delay information aggregated across all observed trains on a ride
+ *  segment. `null` (on `RideSegment`) means we couldn't see any trains
+ *  serving these stops in the current snapshot — different signal than
+ *  "we observed N trains and they were all on time". */
+export interface DelayInfo {
+  minSeconds: number;
+  maxSeconds: number;
+  /** Number of trains contributing data to this aggregate. */
+  trainsObserved: number;
+}
+
 export interface RideSegment {
   type: "ride";
   routeId: string;
@@ -87,7 +98,7 @@ export interface RideSegment {
   path: [number, number][];
   intermediateStops: number;
   minutes: number;
-  delaySeconds: number | null;
+  delay: DelayInfo | null;
 }
 
 export interface TransferSegment {

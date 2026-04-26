@@ -1,5 +1,5 @@
 import { ROUTE_GROUPS } from "@panoptrain/shared";
-import type { StopsGeoJSON, TripPlan } from "@panoptrain/shared";
+import type { StopsGeoJSON, TripPlan, TrainPosition } from "@panoptrain/shared";
 import { LineToggle } from "./LineToggle.js";
 import { TripPlanner } from "./TripPlanner.js";
 import { StatusBadge } from "../Layout/StatusBadge.js";
@@ -16,6 +16,7 @@ interface FilterPanelProps {
   lastUpdated: number | null;
   trainCount: number;
   stops: StopsGeoJSON | null;
+  liveTrains: TrainPosition[];
   onPlanFound?: (plan: TripPlan | null) => void;
 }
 
@@ -29,6 +30,7 @@ export function FilterPanel({
   isStale,
   trainCount,
   stops,
+  liveTrains,
   onPlanFound,
 }: FilterPanelProps) {
   return (
@@ -103,7 +105,7 @@ export function FilterPanel({
         </div>
 
         {/* Trip planner */}
-        <TripPlanner stops={stops} onPlanFound={onPlanFound} />
+        <TripPlanner stops={stops} liveTrains={liveTrains} onPlanFound={onPlanFound} />
 
         {/* Quick actions */}
         <div

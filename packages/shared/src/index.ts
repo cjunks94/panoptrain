@@ -11,6 +11,7 @@ export type {
   PlanResponse,
   RideSegment,
   TransferSegment,
+  DelayInfo,
 } from "./types/api.js";
 export type {
   ParsedVehicle,
