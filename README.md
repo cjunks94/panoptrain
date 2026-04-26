@@ -97,3 +97,16 @@ Goal: planner returns multiple route options and surfaces real-time delay contex
 | PT-307 | P2 | Smarter transfer time | Replace constant `TRANSFER_MIN = 1` with per-station heuristic based on platform geometry. |
 | PT-308 | P2 | Flexible departure window | Show "leave now vs. in 5/10 min" impact based on next train ETAs. |
 | PT-309 | P1 | Spotlight trains on selected trip | When a plan is active, highlight the live trains running the planned routes (e.g. brighten matching, dim others) and ensure the planned rail segments stay visually emphasized. Filter the train snapshot by `routeId` for each ride segment and surface ETA from the closest train to the boarding stop. |
+
+### Epic 4 — Mobile-first design
+Goal: every flow that works on desktop is equally usable on a phone. Existing e2e covers Pixel 7 and iPhone 14 viewports, but the panel still uses a desktop-shaped sidebar and the trip planner relies on `<datalist>` autocomplete that's flaky on iOS. Tracking the work to make mobile a first-class target.
+
+| ID | P | Title | Notes |
+|---|---|---|---|
+| PT-401 | P0 | Touch target audit | Sweep `FilterPanel.tsx`, `TripPlanner.tsx`, `LineToggle.tsx` for buttons/toggles smaller than 44×44 px. Bump padding/min-height where needed without bloating the desktop layout. |
+| PT-402 | P0 | Bottom-sheet panel below 480px | The 260px fixed left sidebar takes ~67% of an iPhone 14 viewport. Switch to a slide-up bottom sheet (or half-screen modal) at narrow widths so the map gets full use of the screen. |
+| PT-403 | P1 | Replace `<datalist>` station picker | iOS Safari renders `<datalist>` inconsistently and doesn't filter as the user types. Build a small searchable combobox so mobile users can find stations without playing Whac-a-Mole with the keyboard. |
+| PT-404 | P1 | Plan tab strip overflow | Three plan tabs (`Recommended · 14m / Avoids N · 14m / Alternative 1 · 30m`) overflow narrow viewports. Add horizontal scroll-snap or wrap below a breakpoint. |
+| PT-405 | P1 | iOS safe-area insets | Honour `env(safe-area-inset-top/bottom)` on the panel and any fixed-position UI so the status badge and bottom-sheet handles clear the notch and home indicator. |
+| PT-406 | P2 | Mobile performance audit | Profile RAF FPS and JS execution on a mid-range Android (Pixel 5-class) over throttled 4G. Tune `FRAME_INTERVAL` and dedup grid if needed. Capture a baseline so future changes don't regress. |
+| PT-407 | P2 | Expand mobile e2e | Today mobile tests only cover viewport rendering; extend to a full plan flow on Pixel 7 / iPhone 14 (open panel → search → pick alternative → verify spotlight). |
