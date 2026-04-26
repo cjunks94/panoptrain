@@ -1,5 +1,6 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
+import { compress } from "hono/compress";
 import { cors } from "hono/cors";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, extname } from "node:path";
@@ -18,6 +19,11 @@ const app = new Hono();
 
 // CORS for local development
 app.use("/*", cors({ origin: "*" }));
+
+// gzip/deflate JSON API responses (PT-103). Default 1024 byte threshold means
+// tiny endpoints like /api/health pass through uncompressed. /api/trains and
+// /api/routes shrink ~70% — the route GeoJSON in particular is multi-MB.
+app.use("/api/*", compress());
 
 // Health check
 app.get("/api/health", (c) => c.json({ status: "ok", uptime: process.uptime() }));

@@ -16,21 +16,19 @@ export function useRouteShapes(): UseRouteShapesResult {
   useEffect(() => {
     let cancelled = false;
 
-    async function load() {
-      try {
-        const [routes, stops] = await Promise.all([fetchRoutes(), fetchStops()]);
-        if (!cancelled) {
-          setRouteShapes(routes);
-          setStopsGeoJson(enrichStops(stops));
-        }
-      } catch (err) {
-        console.error("Failed to load static data:", err);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
+    // Fetch stops and routes independently so each renders as soon as it's
+    // ready (PT-104). The routes GeoJSON is multi-MB; previously Promise.all
+    // held back the smaller stops payload until both resolved. With them
+    // decoupled, station dots/labels appear well before the route lines.
+    fetchStops()
+      .then((stops) => { if (!cancelled) setStopsGeoJson(enrichStops(stops)); })
+      .catch((err) => console.error("Failed to load stops:", err));
 
-    load();
+    fetchRoutes()
+      .then((routes) => { if (!cancelled) setRouteShapes(routes); })
+      .catch((err) => console.error("Failed to load routes:", err))
+      .finally(() => { if (!cancelled) setLoading(false); });
+
     return () => {
       cancelled = true;
     };

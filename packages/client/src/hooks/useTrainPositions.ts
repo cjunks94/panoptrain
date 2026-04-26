@@ -22,6 +22,12 @@ export function useTrainPositions(): UseTrainPositionsResult {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const poll = useCallback(async () => {
+    // Skip the network round-trip when the tab isn't visible — the user
+    // can't see the trains anyway, and we'll grab fresh data the moment
+    // they switch back. Saves bandwidth and battery on long-idle tabs.
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      return;
+    }
     try {
       const result = await fetchTrains();
       setData(result);
@@ -39,6 +45,17 @@ export function useTrainPositions(): UseTrainPositionsResult {
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
+  }, [poll]);
+
+  // When the tab becomes visible again, immediately refresh so users don't
+  // see stale positions while waiting for the next interval tick (PT-105).
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const onVisChange = () => {
+      if (document.visibilityState === "visible") poll();
+    };
+    document.addEventListener("visibilitychange", onVisChange);
+    return () => document.removeEventListener("visibilitychange", onVisChange);
   }, [poll]);
 
   // Check staleness
