@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { TripPlan } from "@panoptrain/shared";
 import { AppShell } from "./components/Layout/AppShell.js";
@@ -13,9 +13,23 @@ export default function App() {
   const { data, isStale, lastUpdated } = useTrainPositions();
   const { routeShapes, stopsGeoJson } = useRouteShapes();
   const { visibleRoutes, toggleRoute, toggleGroup, allOn, allOff } = useLineFilter();
-  const { geojsonRef, interpolateFrame, trains } = useTrainFeatures(data, visibleRoutes, routeShapes);
   const [panelOpen, setPanelOpen] = useState(true);
   const [planRoute, setPlanRoute] = useState<TripPlan | null>(null);
+
+  // When a plan is active, surface only the routes that plan rides — these
+  // are the trains we want to spotlight on the map (PT-309).
+  const planRouteIds = useMemo<Set<string> | null>(() => {
+    if (!planRoute) return null;
+    const ids = new Set<string>();
+    for (const seg of planRoute.segments) {
+      if (seg.type === "ride") ids.add(seg.routeId);
+    }
+    return ids;
+  }, [planRoute]);
+
+  const { geojsonRef, interpolateFrame, trains } = useTrainFeatures(
+    data, visibleRoutes, routeShapes, planRouteIds,
+  );
 
   const togglePanel = useCallback(() => setPanelOpen((p) => !p), []);
 
@@ -28,6 +42,7 @@ export default function App() {
         routeShapes={routeShapes}
         stops={stopsGeoJson}
         planRoute={planRoute}
+        planRouteIds={planRouteIds}
       />
       <FilterPanel
         open={panelOpen}
@@ -41,6 +56,7 @@ export default function App() {
         lastUpdated={lastUpdated}
         trainCount={data?.count ?? 0}
         stops={stopsGeoJson}
+        liveTrains={data?.trains ?? []}
         onPlanFound={setPlanRoute}
       />
     </AppShell>

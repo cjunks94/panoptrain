@@ -1,14 +1,16 @@
 import { useState, useMemo, useId } from "react";
-import type { StopsGeoJSON, TripPlan } from "@panoptrain/shared";
+import type { StopsGeoJSON, TripPlan, DelayInfo, TrainPosition } from "@panoptrain/shared";
 import { fetchPlan } from "../../lib/api.js";
 import { getRouteInfo } from "../../lib/colors.js";
 
 interface TripPlannerProps {
   stops: StopsGeoJSON | null;
+  /** Live train snapshot — used to compute next-train ETA per ride segment. */
+  liveTrains?: TrainPosition[];
   onPlanFound?: (plan: TripPlan | null) => void;
 }
 
-export function TripPlanner({ stops, onPlanFound }: TripPlannerProps) {
+export function TripPlanner({ stops, liveTrains = [], onPlanFound }: TripPlannerProps) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [plans, setPlans] = useState<TripPlan[]>([]);
@@ -153,35 +155,91 @@ export function TripPlanner({ stops, onPlanFound }: TripPlannerProps) {
         </div>
       )}
 
-      {activePlan && <PlanResult plan={activePlan} />}
+      {activePlan && <PlanResult plan={activePlan} liveTrains={liveTrains} />}
     </div>
   );
 }
 
-function PlanResult({ plan }: { plan: TripPlan }) {
-  const totalDelay = plan.segments.reduce(
-    (sum, s) => sum + (s.type === "ride" && s.delaySeconds ? s.delaySeconds : 0), 0,
-  );
-  const adjustedMin = plan.totalMinutes + Math.round(totalDelay / 60);
+function PlanResult({ plan, liveTrains }: { plan: TripPlan; liveTrains: TrainPosition[] }) {
+  // Total ETA adjustment uses the midpoint of each segment's delay range —
+  // a reasonable point estimate; the per-segment row shows the actual range.
+  const totalDelaySeconds = plan.segments.reduce((sum, s) => {
+    if (s.type !== "ride" || !s.delay) return sum;
+    return sum + (s.delay.minSeconds + s.delay.maxSeconds) / 2;
+  }, 0);
+  const adjustedMin = plan.totalMinutes + Math.round(totalDelaySeconds / 60);
+  const hasDelay = totalDelaySeconds > 30;
 
   return (
     <div style={{ marginTop: 12 }}>
       <div style={{ fontSize: 12, color: "#aaa", marginBottom: 8 }}>
         <strong style={{ color: "#fff" }}>{plan.totalMinutes} min</strong>
-        {totalDelay > 0 && (
+        {hasDelay && (
           <span style={{ color: "#f87171" }}> (est. {adjustedMin} min with delays)</span>
         )}
         {" · "}{plan.totalStops} stops
         {plan.transferCount > 0 && ` · ${plan.transferCount} transfer${plan.transferCount > 1 ? "s" : ""}`}
       </div>
       {plan.segments.map((seg, i) => (
-        <SegmentRow key={i} segment={seg} />
+        <SegmentRow key={i} segment={seg} liveTrains={liveTrains} />
       ))}
     </div>
   );
 }
 
-function SegmentRow({ segment }: { segment: TripPlan["segments"][number] }) {
+/** Find the next train heading toward the boarding platform (PT-309). Returns
+ *  null when no live train on this route is approaching the stop. */
+function nextTrainEta(
+  routeId: string,
+  boardStopId: string,
+  trains: TrainPosition[],
+): { text: string; color: string } | null {
+  if (trains.length === 0) return null;
+
+  // Train sitting at the platform now — board immediately.
+  const here = trains.find((t) =>
+    t.routeId === routeId && t.currentStopId === boardStopId && t.status === "STOPPED_AT",
+  );
+  if (here) return { text: "Next: now", color: "#22c55e" };
+
+  // Trains where boardStopId is their next stop — incoming.
+  const incoming = trains.filter((t) =>
+    t.routeId === routeId && t.nextStopId === boardStopId,
+  );
+  if (incoming.length === 0) return null;
+
+  // Freshest update wins
+  incoming.sort((a, b) => b.updatedAt - a.updatedAt);
+  const t = incoming[0];
+  if (t.status === "INCOMING_AT") return { text: "Next: <1 min", color: "#22c55e" };
+  return { text: "Next: ~2 min", color: "#cbd5e1" };
+}
+
+/** Format a DelayInfo as a short status pill. Returns null when we have no
+ *  observation data (different signal than "observed and on time"). */
+function delayStatus(delay: DelayInfo | null): { text: string; color: string } | null {
+  if (!delay) return null;
+  const minMin = Math.round(delay.minSeconds / 60);
+  const maxMin = Math.round(delay.maxSeconds / 60);
+  const trains = `${delay.trainsObserved} train${delay.trainsObserved > 1 ? "s" : ""}`;
+
+  if (maxMin <= 0) {
+    return { text: `On time · ${trains}`, color: "#22c55e" };
+  }
+  if (minMin === maxMin) {
+    return { text: `+${maxMin} min late · ${trains}`, color: "#f87171" };
+  }
+  // Range — flag high-variance ("1-8 min" reads worse than "2-3 min")
+  return { text: `+${minMin}-${maxMin} min late · ${trains}`, color: "#f87171" };
+}
+
+function SegmentRow({
+  segment,
+  liveTrains,
+}: {
+  segment: TripPlan["segments"][number];
+  liveTrains: TrainPosition[];
+}) {
   const [expanded, setExpanded] = useState(false);
 
   if (segment.type === "transfer") {
@@ -192,7 +250,8 @@ function SegmentRow({ segment }: { segment: TripPlan["segments"][number] }) {
     );
   }
   const info = getRouteInfo(segment.routeId);
-  const delayMin = segment.delaySeconds ? Math.round(segment.delaySeconds / 60) : 0;
+  const status = delayStatus(segment.delay);
+  const eta = nextTrainEta(segment.routeId, segment.boardAt.stopId, liveTrains);
 
   return (
     <div style={{ padding: "6px 0" }}>
@@ -217,13 +276,13 @@ function SegmentRow({ segment }: { segment: TripPlan["segments"][number] }) {
         </span>
         <div style={{ fontSize: 12, color: "#ddd", lineHeight: 1.4, flex: 1 }}>
           <div>{segment.boardAt.stopName} → {segment.alightAt.stopName}</div>
-          <div style={{ color: "#888", fontSize: 11, display: "flex", gap: 6, alignItems: "center" }}>
+          <div style={{ color: "#888", fontSize: 11, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
             <span>{segment.minutes} min · {segment.intermediateStops + 1} stop{segment.intermediateStops === 0 ? "" : "s"}</span>
-            {delayMin > 0 && (
-              <span style={{ color: "#f87171", fontWeight: 600 }}>+{delayMin} min late</span>
+            {status && (
+              <span style={{ color: status.color, fontWeight: 600 }}>{status.text}</span>
             )}
-            {delayMin === 0 && segment.delaySeconds !== null && (
-              <span style={{ color: "#22c55e", fontWeight: 600 }}>On time</span>
+            {eta && (
+              <span style={{ color: eta.color, fontWeight: 600 }}>{eta.text}</span>
             )}
           </div>
           {segment.stops.length > 2 && (

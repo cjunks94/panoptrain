@@ -271,7 +271,7 @@ export function planTrip(
       path: extractShapePath(gtfs, routeId, stopIds),
       intermediateStops: Math.max(0, intermediateStops),
       minutes: Math.round(rideMin * 10) / 10,
-      delaySeconds: null, // filled in below
+      delay: null, // filled in below
     });
   }
 
@@ -391,6 +391,20 @@ export function planTrips(
   return plans;
 }
 
+/** Equirectangular approximation of geodesic distance in km. Accurate enough
+ *  for short subway segments and crucially correct east-west at NYC latitude
+ *  (1° longitude ≈ 85 km here, not 111). The naive √(Δlon²+Δlat²)·111
+ *  formula over-counts longitudinal distance and truncates long east-west
+ *  paths like M-line trips to Brooklyn. */
+function geoDistKm(a: [number, number], b: [number, number]): number {
+  const [lon1, lat1] = a;
+  const [lon2, lat2] = b;
+  const meanLat = ((lat1 + lat2) / 2) * (Math.PI / 180);
+  const dLat = lat2 - lat1;
+  const dLon = (lon2 - lon1) * Math.cos(meanLat);
+  return Math.sqrt(dLat * dLat + dLon * dLon) * 111.32;
+}
+
 /** Extract shape coordinates between the first and last stops of a ride segment. */
 function extractShapePath(
   gtfs: StaticGtfsData,
@@ -420,10 +434,7 @@ function extractShapePath(
 
     for (let j = 0; j < shape.coordinates.length; j++) {
       if (j > 0) {
-        const [lon1, lat1] = shape.coordinates[j - 1];
-        const [lon2, lat2] = shape.coordinates[j];
-        const segLen = Math.sqrt((lon2 - lon1) ** 2 + (lat2 - lat1) ** 2) * 111.32; // rough km
-        cumDist += segLen;
+        cumDist += geoDistKm(shape.coordinates[j - 1], shape.coordinates[j]);
       }
       if (cumDist >= minDist && cumDist <= maxDist + 0.01) {
         coords.push(shape.coordinates[j]);
@@ -441,15 +452,22 @@ function extractShapePath(
     .map((s) => [s!.lon, s!.lat] as [number, number]);
 }
 
-/** Cross-reference ride segments with live train delays. */
+/**
+ * Cross-reference ride segments with live train delays.
+ *
+ * For each segment we look at every train currently on the segment's route
+ * that's stopped at one of the segment's stops, and record the **range**
+ * (min/max) of delays plus the count of trains observed. This preserves
+ * outliers (a single 10-min-late train next to three on-time ones) instead
+ * of averaging them away. Includes on-time trains so the UI can say
+ * "3 trains, on time" rather than "no data".
+ */
 function enrichWithDelays(segments: Array<RideSegment | TransferSegment>): void {
   const snapshot = getCurrentSnapshot();
   if (!snapshot) return;
 
-  // Index trains by routeId for quick lookup
   const trainsByRoute = new Map<string, TrainPosition[]>();
   for (const t of snapshot.trains) {
-    if (t.delay === null || t.delay === 0) continue;
     if (!trainsByRoute.has(t.routeId)) trainsByRoute.set(t.routeId, []);
     trainsByRoute.get(t.routeId)!.push(t);
   }
@@ -459,16 +477,15 @@ function enrichWithDelays(segments: Array<RideSegment | TransferSegment>): void 
     const trains = trainsByRoute.get(seg.routeId);
     if (!trains || trains.length === 0) continue;
 
-    // Find trains at/near stops in this segment
     const segStopIds = new Set(seg.stops.map((s) => s.stopId));
-    const matchingDelays = trains
-      .filter((t) => segStopIds.has(t.currentStopId))
-      .map((t) => t.delay!);
+    const matching = trains.filter((t) => segStopIds.has(t.currentStopId));
+    if (matching.length === 0) continue;
 
-    if (matchingDelays.length > 0) {
-      seg.delaySeconds = Math.round(
-        matchingDelays.reduce((a, b) => a + b, 0) / matchingDelays.length,
-      );
-    }
+    const delays = matching.map((t) => t.delay ?? 0);
+    seg.delay = {
+      minSeconds: Math.min(...delays),
+      maxSeconds: Math.max(...delays),
+      trainsObserved: matching.length,
+    };
   }
 }

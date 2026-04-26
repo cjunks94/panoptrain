@@ -1,7 +1,9 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterEach } from "vitest";
 import { loadStaticGtfs } from "../gtfs-loader.js";
 import { buildStationGraph, planTrip, planTrips, type StationGraph } from "../trip-planner.js";
+import { updateCache } from "../cache.js";
 import type { StaticGtfsData } from "../gtfs-loader.js";
+import type { TrainPosition } from "@panoptrain/shared";
 
 let gtfs: StaticGtfsData;
 let graph: StationGraph;
@@ -143,5 +145,83 @@ describe("planTrips", () => {
         });
       expect(sameRoutes).toBe(false);
     }
+  });
+});
+
+describe("enrichWithDelays", () => {
+  // These tests mutate the shared train-snapshot cache, so reset to empty
+  // afterwards so other tests aren't affected by leftover data.
+  afterEach(() => updateCache([]));
+
+  function fakeTrain(routeId: string, currentStopId: string, delay: number): TrainPosition {
+    return {
+      tripId: `t-${currentStopId}`,
+      routeId,
+      direction: 0,
+      latitude: 0,
+      longitude: 0,
+      bearing: null,
+      status: "STOPPED_AT",
+      currentStopId,
+      currentStopName: "x",
+      nextStopId: null,
+      nextStopName: null,
+      destination: "x",
+      delay,
+      updatedAt: Math.floor(Date.now() / 1000),
+    };
+  }
+
+  it("populates delay as a min/max range with observation count", () => {
+    const samplePlan = planTrip(graph, gtfs, "127", "132");
+    const rideSeg = samplePlan!.segments.find((s) => s.type === "ride");
+    if (!rideSeg || rideSeg.type !== "ride") throw new Error("expected ride segment");
+    const stopIds = rideSeg.stops.map((s) => s.stopId);
+    const routeId = rideSeg.routeId;
+    expect(stopIds.length).toBeGreaterThanOrEqual(3);
+
+    updateCache([
+      fakeTrain(routeId, stopIds[0], 60),
+      fakeTrain(routeId, stopIds[1], 300),
+      fakeTrain(routeId, stopIds[2], 0),
+    ]);
+
+    const plan = planTrip(graph, gtfs, "127", "132");
+    const ride = plan!.segments.find((s) => s.type === "ride");
+    if (!ride || ride.type !== "ride") throw new Error("expected ride segment");
+    expect(ride.delay).not.toBeNull();
+    expect(ride.delay!.minSeconds).toBe(0);
+    expect(ride.delay!.maxSeconds).toBe(300);
+    expect(ride.delay!.trainsObserved).toBe(3);
+  });
+
+  it("preserves outliers instead of averaging them away", () => {
+    // Single 10-min-late train among on-time peers should still surface
+    // as max=600 (not averaged down to ~150).
+    const samplePlan = planTrip(graph, gtfs, "127", "132");
+    const rideSeg = samplePlan!.segments.find((s) => s.type === "ride");
+    if (!rideSeg || rideSeg.type !== "ride") throw new Error("expected ride segment");
+    const stopIds = rideSeg.stops.map((s) => s.stopId);
+    const routeId = rideSeg.routeId;
+
+    updateCache([
+      fakeTrain(routeId, stopIds[0], 0),
+      fakeTrain(routeId, stopIds[1], 0),
+      fakeTrain(routeId, stopIds[2], 600),
+    ]);
+
+    const plan = planTrip(graph, gtfs, "127", "132");
+    const ride = plan!.segments.find((s) => s.type === "ride");
+    if (!ride || ride.type !== "ride") throw new Error("expected ride segment");
+    expect(ride.delay!.minSeconds).toBe(0);
+    expect(ride.delay!.maxSeconds).toBe(600);
+  });
+
+  it("delay is null when no trains are observed on the segment", () => {
+    updateCache([]);
+    const plan = planTrip(graph, gtfs, "127", "132");
+    const ride = plan!.segments.find((s) => s.type === "ride");
+    if (!ride || ride.type !== "ride") throw new Error("expected ride segment");
+    expect(ride.delay).toBeNull();
   });
 });

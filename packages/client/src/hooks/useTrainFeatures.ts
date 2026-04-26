@@ -41,11 +41,16 @@ const EMPTY_FC: GeoJSON.FeatureCollection = { type: "FeatureCollection", feature
  * Builds train GeoJSON features once per data/filter change.
  * Exposes an interpolateFrame() function that mutates coordinates in-place
  * for the RAF loop — no React state updates during animation.
+ *
+ * When `planRouteIds` is non-null, trains whose routeId is NOT in that set
+ * are filtered out entirely so only the trains relevant to the active plan
+ * remain on the map (PT-309 focus mode).
  */
 export function useTrainFeatures(
   data: TrainsResponse | null,
   visibleRoutes: Set<string>,
   routeShapes: RoutesGeoJSON | null,
+  planRouteIds: Set<string> | null = null,
 ) {
   const geojsonRef = useRef(EMPTY_FC);
   const prevPositions = useRef(new Map<string, [number, number]>());
@@ -105,7 +110,9 @@ export function useTrainFeatures(
     const d = lastDataRef.current;
     if (!d) return;
 
-    const visible = d.trains.filter((t) => visibleRoutes.has(t.routeId));
+    const visible = d.trains.filter((t) =>
+      visibleRoutes.has(t.routeId) && (!planRouteIds || planRouteIds.has(t.routeId)),
+    );
 
     // Deduplicate: within ~50m grid, keep one train per route
     const DEDUP_GRID = 0.0005;
@@ -180,7 +187,7 @@ export function useTrainFeatures(
       const info = getRouteInfo(t.routeId);
       return { ...t, color: info.color, textColor: info.textColor, isExpress: info.isExpress };
     }));
-  }, [data, visibleRoutes]);
+  }, [data, visibleRoutes, planRouteIds]);
 
   // Mutate GeoJSON coordinates in-place for animation — called by RAF loop
   const interpolateFrame = useCallback(() => {
