@@ -34,8 +34,15 @@ test.describe("Panoptrain — happy path", () => {
     await expect(page.getByRole("heading", { name: "Panoptrain" })).toBeVisible();
   });
 
-  test("can collapse and reopen the filter panel", async ({ page }) => {
+  test("can collapse and reopen the filter panel", async ({ page, viewport }) => {
     await page.goto("/");
+    // Mobile defaults the bottom sheet closed (so users land on the map);
+    // desktop defaults the sidebar open. Normalize to open before the
+    // collapse/reopen flow so this test runs identically across viewports.
+    const isMobile = (viewport?.width ?? 1280) < 768;
+    if (isMobile) {
+      await page.getByRole("button", { name: "Filter Lines" }).click();
+    }
     await expect(page.getByRole("heading", { name: "Panoptrain" })).toBeVisible();
 
     // Close the panel via the × button
