@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import Map, { Source, Layer, Popup } from "react-map-gl/maplibre";
 import type { MapLayerMouseEvent, MapRef } from "react-map-gl/maplibre";
-import type { RoutesGeoJSON, StopsGeoJSON, TripPlan } from "@panoptrain/shared";
+import type { Mode, RoutesGeoJSON, StopsGeoJSON, TripPlan } from "@panoptrain/shared";
 import { ROUTE_INFO } from "@panoptrain/shared";
 import type { TrainInfo } from "../../hooks/useTrainFeatures.js";
 import type { GeoJSON } from "geojson";
@@ -48,6 +48,9 @@ interface TransitMapProps {
   planRoute: TripPlan | null;
   /** When set, hide all non-plan route lines and pulse the plan outline. */
   planRouteIds: Set<string> | null;
+  /** Active transit mode. Drives auto-fit on mode switch and per-mode line
+   *  styling. */
+  mode: Mode;
 }
 
 interface PopupInfo {
@@ -56,7 +59,7 @@ interface PopupInfo {
   lat: number;
 }
 
-export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, stops, planRoute, planRouteIds }: TransitMapProps) {
+export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, stops, planRoute, planRouteIds, mode }: TransitMapProps) {
   const [popup, setPopup] = useState<PopupInfo | null>(null);
   const [iconsReady, setIconsReady] = useState(false);
   const mapRef = useRef<MapRef>(null);
@@ -91,6 +94,47 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     map.addImage("marker-square", createSquareIcon(size), { sdf: true });
     setIconsReady(true);
   }, []);
+
+  // Auto-fit the viewport to the active mode's network on mode switch (PT-507).
+  // Subway → NYC; LIRR → Long Island. Without this, switching to LIRR leaves
+  // the user staring at Manhattan with the network entirely off-screen.
+  //
+  // Track which mode we last fit, not whether the effect has fired. The
+  // earlier "fired-once" guard tripped on mount with routeShapes=null, then
+  // ran for real once routes loaded — overriding initialViewState. Using
+  // a mode ref means the initial mode just records itself the first time
+  // its routes arrive (no fit), and only subsequent mode changes trigger a
+  // fit.
+  const lastFitMode = useRef<Mode | null>(null);
+  useEffect(() => {
+    if (!routeShapes || routeShapes.features.length === 0) return;
+    if (lastFitMode.current === null) {
+      // First time we have routes — record this as the seed mode and let
+      // initialViewState own the camera.
+      lastFitMode.current = mode;
+      return;
+    }
+    if (lastFitMode.current === mode) return;
+
+    const map = mapRef.current?.getMap();
+    if (!map) return;
+    let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
+    for (const feature of routeShapes.features) {
+      for (const [lon, lat] of feature.geometry.coordinates) {
+        if (lon < minLon) minLon = lon;
+        if (lon > maxLon) maxLon = lon;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+      }
+    }
+    if (minLon === Infinity) return;
+    map.fitBounds([[minLon, minLat], [maxLon, maxLat]], {
+      padding: { top: 60, bottom: 60, left: 320, right: 60 },
+      duration: 800,
+      maxZoom: 12,
+    });
+    lastFitMode.current = mode;
+  }, [mode, routeShapes]);
 
   // Auto-fit the viewport to the planned route so users immediately see the
   // whole trip — fixes the case where one segment goes off-screen (e.g. an
@@ -280,7 +324,10 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
       cursor="pointer"
     >
       {/* Route lines — when a plan is active, hide every line that isn't on
-          one of the planned routes so the user's chosen path stands alone. */}
+          one of the planned routes so the user's chosen path stands alone.
+          LIRR rails render slightly thicker than subway to match the
+          commuter-rail convention and because LIRR's much-larger geographic
+          spread means each line renders at lower screen-space density. */}
       {allShapes && (
         <Source id="routes" type="geojson" data={allShapes}>
           <Layer
@@ -292,8 +339,8 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
             }
             paint={{
               "line-color": ["get", "color"],
-              "line-width": 2.5,
-              "line-opacity": 0.6,
+              "line-width": mode === "lirr" ? 3.5 : 2.5,
+              "line-opacity": mode === "lirr" ? 0.85 : 0.6,
             }}
           />
         </Source>
@@ -353,24 +400,34 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
             id="station-dots"
             type="circle"
             paint={{
+              // Dot size + halo scale with the API-emitted `importance`
+              // bucket (0/1/2). Per-mode thresholds live server-side so
+              // subway's "8+ routes = hub" logic doesn't dictate LIRR
+              // (where Jamaica + Penn matter regardless of count).
+              //
+              // `coalesce` defaults missing `importance` to 0 — the field
+              // was added in this PR and /api/<mode>/stops is cached for
+              // 24h; any client with a pre-deploy cached payload would
+              // otherwise see every == check evaluate false and render
+              // every station at the smallest size.
               "circle-radius": [
                 "interpolate", ["linear"], ["zoom"],
                 11, [
                   "case",
-                  [">=", ["get", "routeCount"], 8], 4,
-                  [">=", ["get", "routeCount"], 4], 2.5,
+                  ["==", ["coalesce", ["get", "importance"], 0], 2], 4,
+                  ["==", ["coalesce", ["get", "importance"], 0], 1], 2.5,
                   2,
                 ],
                 14, [
                   "case",
-                  [">=", ["get", "routeCount"], 8], 7,
-                  [">=", ["get", "routeCount"], 4], 5,
+                  ["==", ["coalesce", ["get", "importance"], 0], 2], 7,
+                  ["==", ["coalesce", ["get", "importance"], 0], 1], 5,
                   4,
                 ],
                 16, [
                   "case",
-                  [">=", ["get", "routeCount"], 8], 9,
-                  [">=", ["get", "routeCount"], 4], 7,
+                  ["==", ["coalesce", ["get", "importance"], 0], 2], 9,
+                  ["==", ["coalesce", ["get", "importance"], 0], 1], 7,
                   6,
                 ],
               ],
@@ -384,14 +441,14 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
                 "interpolate", ["linear"], ["zoom"],
                 11, [
                   "case",
-                  [">=", ["get", "routeCount"], 8], 2,
-                  [">=", ["get", "routeCount"], 4], 1.5,
+                  ["==", ["coalesce", ["get", "importance"], 0], 2], 2,
+                  ["==", ["coalesce", ["get", "importance"], 0], 1], 1.5,
                   1,
                 ],
                 14, [
                   "case",
-                  [">=", ["get", "routeCount"], 8], 2.5,
-                  [">=", ["get", "routeCount"], 4], 1.8,
+                  ["==", ["coalesce", ["get", "importance"], 0], 2], 2.5,
+                  ["==", ["coalesce", ["get", "importance"], 0], 1], 1.8,
                   1.2,
                 ],
               ],
@@ -399,7 +456,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
               // bright halo for hubs to make them visually "premium".
               "circle-stroke-color": [
                 "case",
-                [">=", ["get", "routeCount"], 8], "#ffffff",
+                ["==", ["coalesce", ["get", "importance"], 0], 2], "#ffffff",
                 "#0a0a1a",
               ],
               "circle-stroke-opacity": 1,
@@ -408,14 +465,16 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
           />
 
           {/* Major-hub labels — shown earlier so the map is readable at
-              default zoom. Filters in only stations with 4+ routes to avoid
-              cluttering Brooklyn / outer borough density. */}
+              default zoom. Filter on importance >= 1: subway suppresses
+              local stops at this zoom (avoids clutter); LIRR shows every
+              station because its network is geographically sparse and 127
+              stations spread over 100+ miles need labels at wider zooms. */}
           <Layer
             id="station-labels-major"
             type="symbol"
             minzoom={12}
             maxzoom={14}
-            filter={[">=", ["get", "routeCount"], 4]}
+            filter={[">=", ["coalesce", ["get", "importance"], 0], 1]}
             layout={{
               "text-field": ["get", "stopName"],
               "text-size": [
@@ -428,7 +487,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
               "text-anchor": "top",
               "text-max-width": 8,
               "text-optional": true,
-              "symbol-sort-key": ["-", 0, ["get", "routeCount"]],
+              "symbol-sort-key": ["-", 0, ["coalesce", ["get", "importance"], 0]],
             }}
             paint={{
               "text-color": "#d8d8e0",
@@ -443,7 +502,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
           />
 
           {/* Detailed labels — at zoom 14+, every station shows its name plus
-              the routes serving it (PT-203). Sorted by routeCount so hubs win
+              the routes serving it (PT-203). Sorted by importance so hubs win
               collision contests. */}
           <Layer
             id="station-labels-detailed"
@@ -461,7 +520,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
               "text-anchor": "top",
               "text-max-width": 10,
               "text-optional": true,
-              "symbol-sort-key": ["-", 0, ["get", "routeCount"]],
+              "symbol-sort-key": ["-", 0, ["coalesce", ["get", "importance"], 0]],
             }}
             paint={{
               "text-color": "#d8d8e0",
@@ -521,9 +580,11 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
         </Source>
       )}
 
-      {/* Train markers — data pushed by RAF loop via source.setData() */}
+      {/* Train markers — data pushed by RAF loop via source.setData(). The
+          source is declared last so its layers render on top of routes,
+          stops, and plan highlights. */}
       <Source id="trains" type="geojson" data={geojsonRef.current}>
-        {/* Glow layer (underneath) */}
+        {/* Soft outer glow */}
         <Layer
           id="train-glow"
           type="circle"
@@ -534,13 +595,47 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
             "circle-blur": 1,
           }}
         />
-        {/* Route bullet — colored circle (local) or square (express) with route letter */}
+        {/* Dark rim — same SDF icons as the marker but slightly larger and
+            dark-tinted, drawn underneath. The 0.55-vs-0.50 size delta shows
+            as a 1-2px dark ring around the colored bullet so trains stand
+            out against same-colored route lines beneath them. We use a
+            symbol layer (not circle) because circle-translate doesn't
+            support data-driven expressions, so cluster fan-out can only be
+            mirrored via icon-offset.
+            icon-offset is multiplied by icon-size for the final screen
+            offset, so the rim's offset values are scaled down to match the
+            marker's screen position: 78px / 0.55 ≈ 142. */}
+        {iconsReady && (
+          <Layer
+            id="train-rim"
+            type="symbol"
+            layout={{
+              "icon-image": ["get", "iconImage"],
+              "icon-size": 0.55,
+              "icon-allow-overlap": true,
+              "icon-ignore-placement": true,
+              "icon-offset": [
+                "interpolate", ["linear"], ["get", "clusterOffset"],
+                -3, ["literal", [-142, 0]],
+                0, ["literal", [0, 0]],
+                3, ["literal", [142, 0]],
+              ] as any,
+            }}
+            paint={{
+              "icon-color": "#0a0a1a",
+              "icon-opacity": ["*", 0.95, ["get", "opacity"]],
+            }}
+          />
+        )}
+        {/* Route bullet — colored shape with route label inside. Both
+            iconImage (circle/square) and label come from per-mode feature
+            properties so the layer config is mode-agnostic. */}
         {iconsReady && (
           <Layer
             id="train-markers"
             type="symbol"
             layout={{
-              "icon-image": ["case", ["get", "isExpress"], "marker-square", "marker-circle"],
+              "icon-image": ["get", "iconImage"],
               "icon-size": 0.5,
               "icon-allow-overlap": true,
               "icon-ignore-placement": true,
@@ -550,7 +645,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
                 0, ["literal", [0, 0]],
                 3, ["literal", [156, 0]],
               ] as any,
-              "text-field": ["get", "routeId"],
+              "text-field": ["get", "label"],
               "text-size": 11,
               "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
               "text-allow-overlap": true,
@@ -567,6 +662,10 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
               "icon-opacity": ["get", "opacity"],
               "text-color": ["get", "textColor"],
               "text-opacity": ["get", "opacity"],
+              // Halo around the route number so it stays readable even if
+              // the icon is rendered against a same-color route line.
+              "text-halo-color": "#0a0a1a",
+              "text-halo-width": 1,
             }}
           />
         )}

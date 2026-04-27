@@ -14,7 +14,7 @@ export default function App() {
   const [mode, setMode] = useMode();
   const { data, isStale, lastUpdated } = useTrainPositions(mode);
   const { routeShapes, stopsGeoJson } = useRouteShapes(mode);
-  const { visibleRoutes, toggleRoute, toggleGroup, allOn, allOff } = useLineFilter();
+  const { visibleRoutes, toggleRoute, toggleGroup, allOn, allOff } = useLineFilter(mode);
   const [panelOpen, setPanelOpen] = useState(true);
   const [planRoute, setPlanRoute] = useState<TripPlan | null>(null);
 
@@ -29,16 +29,8 @@ export default function App() {
     return ids;
   }, [planRoute]);
 
-  // Route-filter chips only exist for subway (PT-506 will add LIRR groups).
-  // On LIRR, bypass the filter by passing a synthetic "all routes" set so
-  // every train shows.
-  const effectiveVisibleRoutes = useMemo(() => {
-    if (mode === "subway") return visibleRoutes;
-    return new Set((data?.trains ?? []).map((t) => t.routeId));
-  }, [mode, visibleRoutes, data]);
-
   const { geojsonRef, interpolateFrame, trains } = useTrainFeatures(
-    data, effectiveVisibleRoutes, routeShapes, planRouteIds,
+    data, visibleRoutes, routeShapes, planRouteIds, mode,
   );
 
   const togglePanel = useCallback(() => setPanelOpen((p) => !p), []);
@@ -53,6 +45,7 @@ export default function App() {
         stops={stopsGeoJson}
         planRoute={planRoute}
         planRouteIds={planRouteIds}
+        mode={mode}
       />
       <FilterPanel
         open={panelOpen}

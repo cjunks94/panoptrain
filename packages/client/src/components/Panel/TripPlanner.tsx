@@ -295,7 +295,9 @@ function SegmentRow({
       </div>
     );
   }
-  const info = getRouteInfo(segment.routeId);
+  // Trip planner is subway-only (PT-508); pass mode explicitly so the now-
+  // required arg on getRouteInfo doesn't fall back to a default.
+  const info = getRouteInfo(segment.routeId, "subway");
   const status = delayStatus(segment.delay);
   const eta = nextTrainEta(segment.routeId, segment.boardAt.stopId, liveTrains);
 
@@ -309,7 +311,7 @@ function SegmentRow({
             justifyContent: "center",
             width: 22,
             height: 22,
-            borderRadius: info.isExpress ? 4 : "50%",
+            borderRadius: info.markerShape === "square" ? 4 : "50%",
             background: info.color,
             color: info.textColor,
             fontWeight: 700,

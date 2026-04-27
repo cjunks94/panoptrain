@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import type { TrainsResponse, TrainPosition, RoutesGeoJSON } from "@panoptrain/shared";
+import type { Mode, TrainsResponse, TrainPosition, RoutesGeoJSON } from "@panoptrain/shared";
 import { getRouteInfo } from "../lib/colors.js";
 import { buildShapeIndex, findTrackPath, interpolateAlongPath } from "../lib/trackInterpolation.js";
 import type { TrackPath } from "../lib/trackInterpolation.js";
@@ -9,7 +9,10 @@ const POLL_INTERVAL = parseInt(import.meta.env.VITE_POLL_INTERVAL_MS ?? "30000",
 export interface TrainInfo extends TrainPosition {
   color: string;
   textColor: string;
-  isExpress: boolean;
+  /** Bullet text — "1" for subway, "BB" / "PJ" / etc. for LIRR branches. */
+  label: string;
+  /** SDF icon name the marker layer should render. */
+  iconImage: "marker-circle" | "marker-square";
 }
 
 interface FeatureProps {
@@ -17,7 +20,8 @@ interface FeatureProps {
   routeId: string;
   color: string;
   textColor: string;
-  isExpress: boolean;
+  label: string;
+  iconImage: "marker-circle" | "marker-square";
   direction: number;
   bearing: number;
   status: string;
@@ -50,7 +54,8 @@ export function useTrainFeatures(
   data: TrainsResponse | null,
   visibleRoutes: Set<string>,
   routeShapes: RoutesGeoJSON | null,
-  planRouteIds: Set<string> | null = null,
+  planRouteIds: Set<string> | null,
+  mode: Mode,
 ) {
   const geojsonRef = useRef(EMPTY_FC);
   const prevPositions = useRef(new Map<string, [number, number]>());
@@ -136,7 +141,7 @@ export function useTrainFeatures(
       const opacity = age <= FRESH ? 1
         : age >= STALE ? 0.35
         : 1 - 0.65 * ((age - FRESH) / (STALE - FRESH));
-      const info = getRouteInfo(t.routeId);
+      const info = getRouteInfo(t.routeId, mode);
 
       return {
         type: "Feature",
@@ -145,7 +150,8 @@ export function useTrainFeatures(
           routeId: t.routeId,
           color: info.color,
           textColor: info.textColor,
-          isExpress: info.isExpress,
+          label: info.label,
+          iconImage: info.markerShape === "square" ? "marker-square" : "marker-circle",
           direction: t.direction,
           bearing: t.bearing ?? (t.direction === 0 ? 0 : 180),
           status: t.status,
@@ -184,10 +190,16 @@ export function useTrainFeatures(
 
     // Update popup-lookup trains (triggers one React render)
     setTrains(deduped.map((t) => {
-      const info = getRouteInfo(t.routeId);
-      return { ...t, color: info.color, textColor: info.textColor, isExpress: info.isExpress };
+      const info = getRouteInfo(t.routeId, mode);
+      return {
+        ...t,
+        color: info.color,
+        textColor: info.textColor,
+        label: info.label,
+        iconImage: info.markerShape === "square" ? "marker-square" : "marker-circle" as const,
+      };
     }));
-  }, [data, visibleRoutes, planRouteIds]);
+  }, [data, visibleRoutes, planRouteIds, mode]);
 
   // Mutate GeoJSON coordinates in-place for animation — called by RAF loop
   const interpolateFrame = useCallback(() => {
