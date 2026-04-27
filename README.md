@@ -110,3 +110,32 @@ Goal: every flow that works on desktop is equally usable on a phone. Existing e2
 | PT-405 | P1 | iOS safe-area insets | Honour `env(safe-area-inset-top/bottom)` on the panel and any fixed-position UI so the status badge and bottom-sheet handles clear the notch and home indicator. |
 | PT-406 | P2 | Mobile performance audit | Profile RAF FPS and JS execution on a mid-range Android (Pixel 5-class) over throttled 4G. Tune `FRAME_INTERVAL` and dedup grid if needed. Capture a baseline so future changes don't regress. |
 | PT-407 | P2 | Expand mobile e2e | Today mobile tests only cover viewport rendering; extend to a full plan flow on Pixel 7 / iPhone 14 (open panel → search → pick alternative → verify spotlight). |
+
+### Epic 5 — Multi-mode (LIRR)
+Goal: surface MTA Long Island Rail Road alongside the subway as a second top-level mode with its own real-time map and filters. The subway codebase has implicit single-mode assumptions (cache, poller, GTFS loader, types) that need to be parametrised first.
+
+**UX decisions (locked in):**
+- **Split tabs** at the top of the panel — `Subway | LIRR` switcher, one mode active at a time. Combined view rejected because LIRR's geography (Penn → Montauk, ~120 mi) and subway's (5-borough, ~30 mi diagonal) make a unified bbox unwatchable.
+- **localStorage** persists the last-used mode under a `panoptrain.mode` key so a returning user lands back on whatever they were looking at, not always Subway.
+- **Trip planner** stays subway-only for now (LIRR is schedule-based with peak/off-peak, zone fares, etc. — its own future epic). The planner section hides or shows a "Subway only" badge when LIRR is the active mode.
+
+**Architecture (single-mode → multi-mode):**
+- `packages/server/src/services/cache.ts` — namespace snapshots by mode (`getCurrentSnapshot(mode)`)
+- `packages/server/src/services/mta-poller.ts` — instantiate twice (subway + LIRR), independent intervals if cadence ever differs
+- `packages/server/src/services/gtfs-loader.ts` — parametrise by mode; LIRR uses different GTFS conventions (timetable-based, zone fares)
+- `packages/shared/src/constants/feeds.ts` — add `LIRR_FEEDS` (trips, vehicles, alerts; public, no key)
+- API surface — separate routes per mode (`/api/lirr/trains`, `/api/subway/trains`) keep caching simple and avoid `?mode=` query bloat. Existing `/api/trains` aliases `/api/subway/trains` for back-compat during the transition.
+- `TrainPosition` type stays mode-agnostic where possible; LIRR-specific fields (zone, peak/off-peak) added behind discriminated unions or as optional.
+
+| ID | P | Title | Notes |
+|---|---|---|---|
+| PT-501 | P0 | Mode-aware backend foundation | Refactor `cache`, `mta-poller`, `gtfs-loader` to accept `mode: "subway" \| "lirr"`. Subway routes keep working unchanged; LIRR pieces wired but feed-fetching gated behind a flag. |
+| PT-502 | P0 | Wire LIRR feeds + static GTFS | Add `LIRR_FEEDS` constant, extend `download-gtfs` script for LIRR static data, validate parsing against the existing types. |
+| PT-503 | P0 | LIRR API surface | `/api/lirr/trains`, `/api/lirr/routes`, `/api/lirr/stops` mirror the subway endpoints. Existing `/api/trains` etc. stay as subway aliases for back-compat. |
+| PT-504 | P0 | Split-tab UI + localStorage persistence | Mode switcher at top of panel. On switch: refetch the 3 endpoints, swap map sources, re-fit viewport. Persist active mode under `panoptrain.mode` so the user returns to whichever they last used. |
+| PT-505 | P1 | LIRR-appropriate map styling | Thicker line-width, branch-coloured rail style, distinct marker shape so commuter rail reads differently from subway bullets. |
+| PT-506 | P1 | LIRR filter groups | New `LIRR_ROUTE_GROUPS` covering the 11 branches (Babylon, Hempstead, Far Rockaway, Long Beach, Montauk, Oyster Bay, Port Jefferson, Port Washington, Ronkonkoma, West Hempstead, Belmont) with their official MTA colours. |
+| PT-507 | P1 | Auto-fit viewport on mode switch | Subway → existing NYC center; LIRR → Long Island bbox. Reuse the trip-planner's `fitBounds` logic. |
+| PT-508 | P1 | Hide planner on LIRR tab | Show a "Subway only — LIRR planning coming soon" placeholder in the planner section when LIRR is active, so users don't see broken inputs. |
+| PT-509 | P2 | LIRR service-alert ribbon | LIRR has frequent published alerts (delays, weekend schedule changes). Surface them on tab switch from the LIRR alerts feed. |
+| PT-510 | P2 | Cross-mode trip planning | Unified graph with Penn / Atlantic / Jamaica / Woodside as transfer nodes between subway and LIRR. Schedule-based for the LIRR portion. Likely warrants its own epic when picked up. |
