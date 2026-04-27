@@ -116,30 +116,45 @@ test.describe("Mobile — Epic 4 readiness", () => {
     });
   });
 
-  test.describe("PT-402 panel coverage", () => {
-    // Marked fixme until PT-402 (bottom-sheet pattern) lands. Remove this
-    // annotation when the panel adapts to narrow viewports.
-    test.fixme("panel does not cover more than 50% of mobile viewport width", async ({ page, viewport }) => {
+  test.describe("PT-402 panel adapts to mobile viewport", () => {
+    test("panel renders as a full-width bottom sheet on mobile", async ({ page, viewport }) => {
       test.skip(!viewport || viewport.width >= 768, "mobile viewports only");
       await page.goto("/");
       await expect(page.getByRole("heading", { name: "Panoptrain" })).toBeVisible();
 
-      // Walk up from the heading to find the absolutely-positioned panel root
-      const panelWidth = await page.evaluate(() => {
+      const panelBox = await page.evaluate(() => {
         const heading = document.querySelector("h1");
         if (!heading) return null;
         let el: HTMLElement | null = heading.parentElement;
         while (el) {
           const cs = getComputedStyle(el);
           if (cs.position === "absolute" || cs.position === "fixed") {
-            return el.getBoundingClientRect().width;
+            const r = el.getBoundingClientRect();
+            return { width: r.width, height: r.height, top: r.top };
           }
           el = el.parentElement;
         }
         return null;
       });
-      expect(panelWidth).not.toBeNull();
-      expect(panelWidth! / viewport!.width).toBeLessThanOrEqual(0.5);
+      expect(panelBox).not.toBeNull();
+      // Bottom sheet: full viewport width (not a 260px sidebar)
+      expect(panelBox!.width / viewport!.width).toBeGreaterThan(0.95);
+      // ≤ ~80% of viewport height so the map shows above
+      expect(panelBox!.height / viewport!.height).toBeLessThanOrEqual(0.8);
+      // Anchored to the bottom — top edge in the lower portion of viewport
+      expect(panelBox!.top).toBeGreaterThanOrEqual(viewport!.height * 0.2);
+    });
+
+    test("dismissing the bottom sheet reveals a full-height map", async ({ page, viewport }) => {
+      test.skip(!viewport || viewport.width >= 768, "mobile viewports only");
+      await page.goto("/");
+      await expect(page.getByRole("heading", { name: "Panoptrain" })).toBeVisible();
+      await page.getByRole("button", { name: "×" }).click();
+      await expect(page.getByRole("button", { name: "Filter Lines" })).toBeVisible();
+
+      const canvas = await page.locator("canvas").first().boundingBox();
+      expect(canvas).not.toBeNull();
+      expect(canvas!.height / viewport!.height).toBeGreaterThanOrEqual(0.8);
     });
   });
 
