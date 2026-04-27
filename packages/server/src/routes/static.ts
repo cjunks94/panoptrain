@@ -28,13 +28,19 @@ export function createStaticRouter(mode: Mode): Hono {
         const shape = gtfs.shapes[trip.shapeId];
         if (!shape || shape.coordinates.length < 2) continue;
 
-        const routeInfo = ROUTE_INFO[trip.routeId];
+        // Prefer the per-mode static GTFS data (correct colors for both subway
+        // and LIRR). Fall back to ROUTE_INFO for any subway lines whose GTFS
+        // route_color is missing. Falling back to ROUTE_INFO without checking
+        // mode would hijack LIRR route IDs (e.g. LIRR "1" Babylon green
+        // collides with subway "1" red).
+        const gtfsRoute = gtfs.routes[trip.routeId];
+        const subwayInfo = mode === "subway" ? ROUTE_INFO[trip.routeId] : undefined;
         features.push({
           type: "Feature",
           properties: {
             routeId: trip.routeId,
-            color: routeInfo?.color ?? "#808183",
-            name: routeInfo?.name ?? trip.routeId,
+            color: gtfsRoute?.color ?? subwayInfo?.color ?? "#808183",
+            name: gtfsRoute?.longName ?? subwayInfo?.name ?? trip.routeId,
           },
           geometry: {
             type: "LineString",

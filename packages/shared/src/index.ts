@@ -21,7 +21,15 @@ export type {
 } from "./types/realtime.js";
 
 // Constants
-export { ROUTE_INFO, ALL_ROUTE_IDS, ROUTE_GROUPS } from "./constants/routes.js";
+export {
+  ROUTE_INFO,
+  ALL_ROUTE_IDS,
+  ROUTE_GROUPS,
+  LIRR_ROUTE_GROUPS,
+  ALL_LIRR_ROUTE_IDS,
+  routeGroupsForMode,
+  allRouteIdsForMode,
+} from "./constants/routes.js";
 export type { RouteInfo } from "./constants/routes.js";
 export {
   SUBWAY_FEEDS,

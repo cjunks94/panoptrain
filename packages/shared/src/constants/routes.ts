@@ -57,3 +57,32 @@ export const ROUTE_GROUPS = [
   { label: "S", routes: ["GS", "FS", "H"], color: "#808183" },
   { label: "SIR", routes: ["SI"], color: "#0039A6" },
 ] as const;
+
+/** LIRR branch groups for the filter panel (PT-506). One toggle per
+ *  branch; Greenport rolls into Ronkonkoma since it's an extension. */
+export const LIRR_ROUTE_GROUPS = [
+  { label: "Babylon", routes: ["1"], color: "#00985F" },
+  { label: "Hempstead", routes: ["2"], color: "#CE8E00" },
+  { label: "Oyster Bay", routes: ["3"], color: "#00AF3F" },
+  { label: "Ronkonkoma", routes: ["4", "13"], color: "#A626AA" },
+  { label: "Montauk", routes: ["5"], color: "#00B2A9" },
+  { label: "Long Beach", routes: ["6"], color: "#FF6319" },
+  { label: "Far Rockaway", routes: ["7"], color: "#6E3219" },
+  { label: "West Hempstead", routes: ["8"], color: "#00A1DE" },
+  { label: "Port Washington", routes: ["9"], color: "#C60C30" },
+  { label: "Port Jefferson", routes: ["10"], color: "#006EC7" },
+  { label: "Belmont", routes: ["11"], color: "#60269E" },
+  { label: "City Terminal", routes: ["12"], color: "#4D5357" },
+] as const;
+
+export const ALL_LIRR_ROUTE_IDS = LIRR_ROUTE_GROUPS.flatMap((g) => g.routes);
+
+import type { Mode } from "./feeds.js";
+
+export function routeGroupsForMode(mode: Mode): readonly { label: string; routes: readonly string[]; color: string }[] {
+  return mode === "subway" ? ROUTE_GROUPS : LIRR_ROUTE_GROUPS;
+}
+
+export function allRouteIdsForMode(mode: Mode): readonly string[] {
+  return mode === "subway" ? ALL_ROUTE_IDS : ALL_LIRR_ROUTE_IDS;
+}

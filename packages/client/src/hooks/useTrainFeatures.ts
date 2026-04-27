@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import type { TrainsResponse, TrainPosition, RoutesGeoJSON } from "@panoptrain/shared";
+import type { Mode, TrainsResponse, TrainPosition, RoutesGeoJSON } from "@panoptrain/shared";
 import { getRouteInfo } from "../lib/colors.js";
 import { buildShapeIndex, findTrackPath, interpolateAlongPath } from "../lib/trackInterpolation.js";
 import type { TrackPath } from "../lib/trackInterpolation.js";
@@ -51,6 +51,7 @@ export function useTrainFeatures(
   visibleRoutes: Set<string>,
   routeShapes: RoutesGeoJSON | null,
   planRouteIds: Set<string> | null = null,
+  mode: Mode = "subway",
 ) {
   const geojsonRef = useRef(EMPTY_FC);
   const prevPositions = useRef(new Map<string, [number, number]>());
@@ -136,7 +137,7 @@ export function useTrainFeatures(
       const opacity = age <= FRESH ? 1
         : age >= STALE ? 0.35
         : 1 - 0.65 * ((age - FRESH) / (STALE - FRESH));
-      const info = getRouteInfo(t.routeId);
+      const info = getRouteInfo(t.routeId, mode);
 
       return {
         type: "Feature",
@@ -184,10 +185,10 @@ export function useTrainFeatures(
 
     // Update popup-lookup trains (triggers one React render)
     setTrains(deduped.map((t) => {
-      const info = getRouteInfo(t.routeId);
+      const info = getRouteInfo(t.routeId, mode);
       return { ...t, color: info.color, textColor: info.textColor, isExpress: info.isExpress };
     }));
-  }, [data, visibleRoutes, planRouteIds]);
+  }, [data, visibleRoutes, planRouteIds, mode]);
 
   // Mutate GeoJSON coordinates in-place for animation — called by RAF loop
   const interpolateFrame = useCallback(() => {

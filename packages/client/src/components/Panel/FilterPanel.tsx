@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ROUTE_GROUPS } from "@panoptrain/shared";
+import { routeGroupsForMode } from "@panoptrain/shared";
 import type { Mode, StopsGeoJSON, TripPlan, TrainPosition } from "@panoptrain/shared";
 import { LineToggle } from "./LineToggle.js";
 import { TripPlanner } from "./TripPlanner.js";
@@ -198,48 +198,40 @@ export function FilterPanel({
           </div>
         )}
 
-        {/* Quick actions + line groups are subway-only (ROUTE_GROUPS lists
-            subway lines). PT-506 will introduce LIRR_ROUTE_GROUPS. */}
-        {mode === "subway" && (
-          <>
-            <div
-              style={{
-                padding: "8px 16px",
-                display: "flex",
-                gap: 8,
-                borderBottom: "1px solid rgba(255,255,255,0.08)",
-              }}
-            >
-              <button onClick={onAllOn} style={quickBtnStyle}>
-                All On
-              </button>
-              <button onClick={onAllOff} style={quickBtnStyle}>
-                All Off
-              </button>
-            </div>
+        {/* Quick actions + line groups (PT-506). routeGroupsForMode pulls
+            either ROUTE_GROUPS (subway) or LIRR_ROUTE_GROUPS (LIRR). */}
+        <div
+          style={{
+            padding: "8px 16px",
+            display: "flex",
+            gap: 8,
+            borderBottom: "1px solid rgba(255,255,255,0.08)",
+          }}
+        >
+          <button onClick={onAllOn} style={quickBtnStyle}>
+            All On
+          </button>
+          <button onClick={onAllOff} style={quickBtnStyle}>
+            All Off
+          </button>
+        </div>
 
-            <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
-              {ROUTE_GROUPS.map((group) => {
-                const allVisible = group.routes.every((r) => visibleRoutes.has(r));
-                const someVisible = group.routes.some((r) => visibleRoutes.has(r));
-                return (
-                  <LineToggle
-                    key={group.label}
-                    label={group.label}
-                    color={group.color}
-                    active={allVisible}
-                    partial={someVisible && !allVisible}
-                    onToggle={() => onToggleGroup(group.label)}
-                  />
-                );
-              })}
-            </div>
-          </>
-        )}
-        {mode === "lirr" && (
-          // Spacer; route filters are subway-only until PT-506 ships LIRR groups.
-          <div style={{ flex: 1 }} />
-        )}
+        <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
+          {routeGroupsForMode(mode).map((group) => {
+            const allVisible = group.routes.every((r) => visibleRoutes.has(r));
+            const someVisible = group.routes.some((r) => visibleRoutes.has(r));
+            return (
+              <LineToggle
+                key={group.label}
+                label={group.label}
+                color={group.color}
+                active={allVisible}
+                partial={someVisible && !allVisible}
+                onToggle={() => onToggleGroup(group.label)}
+              />
+            );
+          })}
+        </div>
       </div>
     </>
   );

@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import Map, { Source, Layer, Popup } from "react-map-gl/maplibre";
 import type { MapLayerMouseEvent, MapRef } from "react-map-gl/maplibre";
-import type { RoutesGeoJSON, StopsGeoJSON, TripPlan } from "@panoptrain/shared";
+import type { Mode, RoutesGeoJSON, StopsGeoJSON, TripPlan } from "@panoptrain/shared";
 import { ROUTE_INFO } from "@panoptrain/shared";
 import type { TrainInfo } from "../../hooks/useTrainFeatures.js";
 import type { GeoJSON } from "geojson";
@@ -48,6 +48,9 @@ interface TransitMapProps {
   planRoute: TripPlan | null;
   /** When set, hide all non-plan route lines and pulse the plan outline. */
   planRouteIds: Set<string> | null;
+  /** Active transit mode. Drives auto-fit on mode switch and per-mode line
+   *  styling. */
+  mode: Mode;
 }
 
 interface PopupInfo {
@@ -56,7 +59,7 @@ interface PopupInfo {
   lat: number;
 }
 
-export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, stops, planRoute, planRouteIds }: TransitMapProps) {
+export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, stops, planRoute, planRouteIds, mode }: TransitMapProps) {
   const [popup, setPopup] = useState<PopupInfo | null>(null);
   const [iconsReady, setIconsReady] = useState(false);
   const mapRef = useRef<MapRef>(null);
@@ -91,6 +94,36 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     map.addImage("marker-square", createSquareIcon(size), { sdf: true });
     setIconsReady(true);
   }, []);
+
+  // Auto-fit the viewport to the active mode's network on mode switch (PT-507).
+  // Subway → NYC; LIRR → Long Island. Without this, switching to LIRR leaves
+  // the user staring at Manhattan with the network entirely off-screen.
+  // Skipped on the very first load so the configured initialViewState wins.
+  const initialFit = useRef(true);
+  useEffect(() => {
+    if (initialFit.current) {
+      initialFit.current = false;
+      return;
+    }
+    if (!routeShapes || routeShapes.features.length === 0) return;
+    const map = mapRef.current?.getMap();
+    if (!map) return;
+    let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
+    for (const feature of routeShapes.features) {
+      for (const [lon, lat] of feature.geometry.coordinates) {
+        if (lon < minLon) minLon = lon;
+        if (lon > maxLon) maxLon = lon;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+      }
+    }
+    if (minLon === Infinity) return;
+    map.fitBounds([[minLon, minLat], [maxLon, maxLat]], {
+      padding: { top: 60, bottom: 60, left: 320, right: 60 },
+      duration: 800,
+      maxZoom: 12,
+    });
+  }, [mode, routeShapes]);
 
   // Auto-fit the viewport to the planned route so users immediately see the
   // whole trip — fixes the case where one segment goes off-screen (e.g. an
@@ -280,7 +313,10 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
       cursor="pointer"
     >
       {/* Route lines — when a plan is active, hide every line that isn't on
-          one of the planned routes so the user's chosen path stands alone. */}
+          one of the planned routes so the user's chosen path stands alone.
+          LIRR rails render slightly thicker than subway to match the
+          commuter-rail convention and because LIRR's much-larger geographic
+          spread means each line renders at lower screen-space density. */}
       {allShapes && (
         <Source id="routes" type="geojson" data={allShapes}>
           <Layer
@@ -292,8 +328,8 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
             }
             paint={{
               "line-color": ["get", "color"],
-              "line-width": 2.5,
-              "line-opacity": 0.6,
+              "line-width": mode === "lirr" ? 3.5 : 2.5,
+              "line-opacity": mode === "lirr" ? 0.85 : 0.6,
             }}
           />
         </Source>

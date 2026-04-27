@@ -1,11 +1,13 @@
 import { useState, useCallback, useEffect } from "react";
-import { ALL_ROUTE_IDS, ROUTE_GROUPS } from "@panoptrain/shared";
+import { allRouteIdsForMode, routeGroupsForMode } from "@panoptrain/shared";
+import type { Mode } from "@panoptrain/shared";
 
-const STORAGE_KEY = "panoptrain:visibleRoutes";
+const STORAGE_PREFIX = "panoptrain:visibleRoutes";
+const storageKey = (mode: Mode) => `${STORAGE_PREFIX}:${mode}`;
 
-function loadFromStorage(): Set<string> {
+function loadFromStorage(mode: Mode): Set<string> {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const stored = localStorage.getItem(storageKey(mode));
     if (stored) {
       const parsed = JSON.parse(stored) as string[];
       if (Array.isArray(parsed)) return new Set(parsed);
@@ -13,12 +15,12 @@ function loadFromStorage(): Set<string> {
   } catch {
     // Corrupt or unavailable — fall through to default
   }
-  return new Set(ALL_ROUTE_IDS);
+  return new Set(allRouteIdsForMode(mode));
 }
 
-function saveToStorage(routes: Set<string>): void {
+function saveToStorage(mode: Mode, routes: Set<string>): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify([...routes]));
+    localStorage.setItem(storageKey(mode), JSON.stringify([...routes]));
   } catch {
     // Storage full or unavailable — ignore
   }
@@ -32,12 +34,20 @@ interface UseLineFilterResult {
   allOff: () => void;
 }
 
-export function useLineFilter(): UseLineFilterResult {
-  const [visibleRoutes, setVisibleRoutes] = useState<Set<string>>(loadFromStorage);
+/** Per-mode filter state: each mode (subway / lirr) gets its own persisted
+ *  visibleRoutes set so toggling Babylon in LIRR doesn't clobber subway
+ *  filters and vice versa (PT-506). */
+export function useLineFilter(mode: Mode): UseLineFilterResult {
+  const [visibleRoutes, setVisibleRoutes] = useState<Set<string>>(() => loadFromStorage(mode));
+
+  // Switch to the saved set for the new mode when mode flips.
+  useEffect(() => {
+    setVisibleRoutes(loadFromStorage(mode));
+  }, [mode]);
 
   useEffect(() => {
-    saveToStorage(visibleRoutes);
-  }, [visibleRoutes]);
+    saveToStorage(mode, visibleRoutes);
+  }, [mode, visibleRoutes]);
 
   const toggleRoute = useCallback((routeId: string) => {
     setVisibleRoutes((prev) => {
@@ -52,7 +62,7 @@ export function useLineFilter(): UseLineFilterResult {
   }, []);
 
   const toggleGroup = useCallback((groupLabel: string) => {
-    const group = ROUTE_GROUPS.find((g) => g.label === groupLabel);
+    const group = routeGroupsForMode(mode).find((g) => g.label === groupLabel);
     if (!group) return;
 
     setVisibleRoutes((prev) => {
@@ -68,9 +78,9 @@ export function useLineFilter(): UseLineFilterResult {
       }
       return next;
     });
-  }, []);
+  }, [mode]);
 
-  const allOn = useCallback(() => setVisibleRoutes(new Set(ALL_ROUTE_IDS)), []);
+  const allOn = useCallback(() => setVisibleRoutes(new Set(allRouteIdsForMode(mode))), [mode]);
   const allOff = useCallback(() => setVisibleRoutes(new Set()), []);
 
   return { visibleRoutes, toggleRoute, toggleGroup, allOn, allOff };
