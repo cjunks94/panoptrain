@@ -1,7 +1,19 @@
 import { useState, useMemo, useId } from "react";
+import type { FocusEvent } from "react";
 import type { StopsGeoJSON, TripPlan, DelayInfo, TrainPosition } from "@panoptrain/shared";
 import { fetchPlan } from "../../lib/api.js";
 import { getRouteInfo } from "../../lib/colors.js";
+
+/** iOS Safari doesn't auto-scroll a focused input into view when its
+ *  on-screen keyboard opens — and the bottom sheet is positioned
+ *  bottom-anchored, so the input often ends up under the keyboard. Defer
+ *  the scroll a frame so the keyboard has time to take its space, then
+ *  align the input to the center of the visible viewport. No-op on
+ *  desktop where the keyboard doesn't reflow layout. */
+function scrollFocusedInputIntoView(e: FocusEvent<HTMLInputElement>) {
+  const target = e.currentTarget;
+  setTimeout(() => target.scrollIntoView({ block: "center", behavior: "smooth" }), 250);
+}
 
 interface TripPlannerProps {
   stops: StopsGeoJSON | null;
@@ -115,6 +127,7 @@ export function TripPlanner({ stops, liveTrains = [], onPlanFound }: TripPlanner
         placeholder="From station"
         value={from}
         onChange={(e) => setFrom(e.target.value)}
+        onFocus={scrollFocusedInputIntoView}
         style={inputStyle}
       />
       <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
@@ -123,6 +136,7 @@ export function TripPlanner({ stops, liveTrains = [], onPlanFound }: TripPlanner
           placeholder="To station"
           value={to}
           onChange={(e) => setTo(e.target.value)}
+          onFocus={scrollFocusedInputIntoView}
           style={{ ...inputStyle, flex: 1 }}
         />
         <button onClick={swap} title="Swap" style={swapBtnStyle}>⇅</button>
@@ -371,24 +385,27 @@ function SegmentRow({
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
-  padding: "6px 8px",
+  minHeight: 44,
+  padding: "0 10px",
   background: "rgba(255,255,255,0.06)",
   border: "1px solid rgba(255,255,255,0.1)",
   borderRadius: 6,
   color: "#e0e0e0",
-  fontSize: 12,
+  fontSize: 14,
   fontFamily: "inherit",
   boxSizing: "border-box",
 };
 
 const swapBtnStyle: React.CSSProperties = {
-  width: 32,
+  width: 44,
+  height: 44,
+  flexShrink: 0,
   background: "rgba(255,255,255,0.06)",
   border: "1px solid rgba(255,255,255,0.1)",
   borderRadius: 6,
   color: "#ccc",
   cursor: "pointer",
-  fontSize: 14,
+  fontSize: 16,
   fontFamily: "inherit",
 };
 
