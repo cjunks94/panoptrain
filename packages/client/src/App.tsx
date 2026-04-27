@@ -15,7 +15,13 @@ export default function App() {
   const { data, isStale, lastUpdated } = useTrainPositions(mode);
   const { routeShapes, stopsGeoJson } = useRouteShapes(mode);
   const { visibleRoutes, toggleRoute, toggleGroup, allOn, allOff } = useLineFilter(mode);
-  const [panelOpen, setPanelOpen] = useState(true);
+  // Default closed on mobile so the bottom sheet doesn't take up 75vh on
+  // first paint — users land on the map, then tap to filter. Desktop keeps
+  // the sidebar open by default since it doesn't cover the map.
+  const [panelOpen, setPanelOpen] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return !window.matchMedia("(max-width: 767px)").matches;
+  });
   const [planRoute, setPlanRoute] = useState<TripPlan | null>(null);
 
   // When a plan is active, surface only the routes that plan rides — these

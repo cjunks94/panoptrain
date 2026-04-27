@@ -55,6 +55,15 @@ export function useTrainPositions(mode: Mode): UseTrainPositionsResult {
   // 30s on a background tab); when visible we poll once immediately for fresh
   // data, then restart the interval so cadence is clean rather than racing
   // a partially-elapsed timer.
+  //
+  // Mobile gotcha: iOS Safari fires `visibilitychange` inconsistently when
+  // the user app-switches or pulls down notification center, and aggressively
+  // throttles setInterval in the background. The result was the user
+  // returning to a stale map with frozen trains. Adding `pageshow`
+  // (fires on bfcache restore — the most common iOS return path) and
+  // `focus` as additional resume signals so any path back to the tab
+  // triggers an immediate fresh fetch. start() is idempotent — calling it
+  // multiple times just clears and restarts the interval.
   useEffect(() => {
     const start = () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -72,16 +81,23 @@ export function useTrainPositions(mode: Mode): UseTrainPositionsResult {
     if (isHidden) stop();
     else start();
 
-    if (typeof document === "undefined") {
+    if (typeof document === "undefined" || typeof window === "undefined") {
       return stop;
     }
     const onVisChange = () => {
       if (document.visibilityState === "visible") start();
       else stop();
     };
+    const onResume = () => {
+      if (document.visibilityState !== "hidden") start();
+    };
     document.addEventListener("visibilitychange", onVisChange);
+    window.addEventListener("pageshow", onResume);
+    window.addEventListener("focus", onResume);
     return () => {
       document.removeEventListener("visibilitychange", onVisChange);
+      window.removeEventListener("pageshow", onResume);
+      window.removeEventListener("focus", onResume);
       stop();
     };
   }, [poll]);
