@@ -155,12 +155,52 @@ export function TripPlanner({ stops, liveTrains = [], onPlanFound }: TripPlanner
         </div>
       )}
 
-      {activePlan && <PlanResult plan={activePlan} liveTrains={liveTrains} />}
+      {activePlan && (
+        <PlanResult
+          plan={activePlan}
+          primary={plans[0]}
+          liveTrains={liveTrains}
+        />
+      )}
     </div>
   );
 }
 
-function PlanResult({ plan, liveTrains }: { plan: TripPlan; liveTrains: TrainPosition[] }) {
+/** Explain why this plan ranks here — direct vs alternatives, what's traded
+ *  (PT-305). For the primary plan, describe its strengths; for alternatives,
+ *  describe what they cost relative to primary so the user can judge.
+ *  Returns null when there's nothing useful to say. */
+function explainPlan(plan: TripPlan, primary: TripPlan): string | null {
+  if (plan === primary) {
+    if (plan.transferCount === 0) return "Why: direct trip, no transfers";
+    return `Why: fastest path with ${plan.transferCount} transfer${plan.transferCount > 1 ? "s" : ""}`;
+  }
+
+  const minDiff = plan.totalMinutes - primary.totalMinutes;
+  const transferDiff = plan.transferCount - primary.transferCount;
+
+  const parts: string[] = [];
+  if (plan.label.startsWith("Avoids ")) {
+    parts.push(`skips the ${plan.label.slice("Avoids ".length)} line`);
+  } else {
+    parts.push("backup routing");
+  }
+  if (minDiff > 0) parts.push(`${minDiff} min slower`);
+  if (transferDiff > 0) parts.push(`+${transferDiff} transfer${transferDiff > 1 ? "s" : ""}`);
+  else if (transferDiff < 0) parts.push(`${-transferDiff} fewer transfer${-transferDiff > 1 ? "s" : ""}`);
+
+  return parts.length === 0 ? null : `Why: ${parts.join(" · ")}`;
+}
+
+function PlanResult({
+  plan,
+  primary,
+  liveTrains,
+}: {
+  plan: TripPlan;
+  primary: TripPlan;
+  liveTrains: TrainPosition[];
+}) {
   // Total ETA adjustment uses the midpoint of each segment's delay range —
   // a reasonable point estimate; the per-segment row shows the actual range.
   const totalDelaySeconds = plan.segments.reduce((sum, s) => {
@@ -169,10 +209,11 @@ function PlanResult({ plan, liveTrains }: { plan: TripPlan; liveTrains: TrainPos
   }, 0);
   const adjustedMin = plan.totalMinutes + Math.round(totalDelaySeconds / 60);
   const hasDelay = totalDelaySeconds > 30;
+  const why = explainPlan(plan, primary);
 
   return (
     <div style={{ marginTop: 12 }}>
-      <div style={{ fontSize: 12, color: "#aaa", marginBottom: 8 }}>
+      <div style={{ fontSize: 12, color: "#aaa", marginBottom: 4 }}>
         <strong style={{ color: "#fff" }}>{plan.totalMinutes} min</strong>
         {hasDelay && (
           <span style={{ color: "#f87171" }}> (est. {adjustedMin} min with delays)</span>
@@ -180,6 +221,11 @@ function PlanResult({ plan, liveTrains }: { plan: TripPlan; liveTrains: TrainPos
         {" · "}{plan.totalStops} stops
         {plan.transferCount > 0 && ` · ${plan.transferCount} transfer${plan.transferCount > 1 ? "s" : ""}`}
       </div>
+      {why && (
+        <div style={{ fontSize: 11, color: "#888", marginBottom: 8, fontStyle: "italic" }}>
+          {why}
+        </div>
+      )}
       {plan.segments.map((seg, i) => (
         <SegmentRow key={i} segment={seg} liveTrains={liveTrains} />
       ))}

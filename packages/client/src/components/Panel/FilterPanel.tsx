@@ -1,8 +1,27 @@
+import { useEffect, useState } from "react";
 import { ROUTE_GROUPS } from "@panoptrain/shared";
 import type { StopsGeoJSON, TripPlan, TrainPosition } from "@panoptrain/shared";
 import { LineToggle } from "./LineToggle.js";
 import { TripPlanner } from "./TripPlanner.js";
 import { StatusBadge } from "../Layout/StatusBadge.js";
+
+const MOBILE_QUERY = "(max-width: 767px)";
+
+/** Reactive viewport check — flips if the user rotates a tablet or resizes
+ *  desktop down to mobile widths. SSR-safe: returns false until mount. */
+function useIsMobile(): boolean {
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia(MOBILE_QUERY).matches,
+  );
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia(MOBILE_QUERY);
+    const update = () => setIsMobile(mq.matches);
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+  return isMobile;
+}
 
 interface FilterPanelProps {
   open: boolean;
@@ -33,50 +52,92 @@ export function FilterPanel({
   liveTrains,
   onPlanFound,
 }: FilterPanelProps) {
+  const isMobile = useIsMobile();
+
+  // Below 768px the panel becomes a bottom sheet (full width × 75vh) so the
+  // map keeps its full horizontal footprint instead of being squeezed by a
+  // 260px sidebar that would eat ~67% of an iPhone 14 viewport (PT-402).
+  // The closed state slides off-screen in the appropriate direction.
+  const panelStyle: React.CSSProperties = isMobile
+    ? {
+        position: "absolute",
+        bottom: open ? 0 : "-100%",
+        left: 0,
+        right: 0,
+        height: "75vh",
+        background: "rgba(26, 26, 46, 0.97)",
+        borderTop: "1px solid rgba(255,255,255,0.08)",
+        borderTopLeftRadius: 16,
+        borderTopRightRadius: 16,
+        backdropFilter: "blur(12px)",
+        zIndex: 10,
+        display: "flex",
+        flexDirection: "column",
+        transition: "bottom 0.25s ease",
+        overflow: "hidden",
+      }
+    : {
+        position: "absolute",
+        top: 0,
+        left: open ? 0 : -280,
+        width: 260,
+        height: "100%",
+        background: "rgba(26, 26, 46, 0.95)",
+        borderRight: "1px solid rgba(255,255,255,0.08)",
+        backdropFilter: "blur(12px)",
+        zIndex: 10,
+        display: "flex",
+        flexDirection: "column",
+        transition: "left 0.2s ease",
+        overflow: "hidden",
+      };
+
+  // Toggle button when panel is closed — top-left on desktop, bottom-center
+  // on mobile so users tap toward the sheet's natural origin.
+  const toggleStyle: React.CSSProperties = isMobile
+    ? {
+        position: "absolute",
+        bottom: 16,
+        left: "50%",
+        transform: "translateX(-50%)",
+        zIndex: 10,
+        background: "rgba(26, 26, 46, 0.9)",
+        border: "1px solid rgba(255,255,255,0.1)",
+        borderRadius: 22,
+        color: "#e0e0e0",
+        padding: "0 20px",
+        height: 44,
+        boxSizing: "border-box",
+        cursor: "pointer",
+        fontSize: 14,
+        backdropFilter: "blur(8px)",
+      }
+    : {
+        position: "absolute",
+        top: 16,
+        left: 16,
+        zIndex: 10,
+        background: "rgba(26, 26, 46, 0.9)",
+        border: "1px solid rgba(255,255,255,0.1)",
+        borderRadius: 8,
+        color: "#e0e0e0",
+        padding: "0 16px",
+        minHeight: 44,
+        cursor: "pointer",
+        fontSize: 14,
+        backdropFilter: "blur(8px)",
+      };
+
   return (
     <>
-      {/* Toggle button when panel is closed */}
       {!open && (
-        <button
-          onClick={onToggle}
-          style={{
-            position: "absolute",
-            top: 16,
-            left: 16,
-            zIndex: 10,
-            background: "rgba(26, 26, 46, 0.9)",
-            border: "1px solid rgba(255,255,255,0.1)",
-            borderRadius: 8,
-            color: "#e0e0e0",
-            padding: "0 16px",
-            minHeight: 44,
-            cursor: "pointer",
-            fontSize: 14,
-            backdropFilter: "blur(8px)",
-          }}
-        >
+        <button onClick={onToggle} style={toggleStyle}>
           Filter Lines
         </button>
       )}
 
       {/* Panel */}
-      <div
-        style={{
-          position: "absolute",
-          top: 0,
-          left: open ? 0 : -280,
-          width: 260,
-          height: "100%",
-          background: "rgba(26, 26, 46, 0.95)",
-          borderRight: "1px solid rgba(255,255,255,0.08)",
-          backdropFilter: "blur(12px)",
-          zIndex: 10,
-          display: "flex",
-          flexDirection: "column",
-          transition: "left 0.2s ease",
-          overflow: "hidden",
-        }}
-      >
+      <div style={panelStyle}>
         {/* Header */}
         <div
           style={{
