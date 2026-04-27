@@ -75,12 +75,18 @@ export function pickShapes(candidates: ShapeCandidate[]): ShapeCandidate[] {
       const c = group[i];
       const firstStop = c.stopSequence[0];
       const lastStop = c.stopSequence[c.stopSequence.length - 1];
-      const firstNew = !mainStops.has(firstStop);
-      const lastNew = !mainStops.has(lastStop);
-      if (!firstNew && !lastNew) continue;
-      const newTerminal = firstNew ? firstStop : lastStop;
-      if (extraCovered.has(newTerminal)) continue;
-      extraCovered.add(newTerminal);
+      // Collect every endpoint that's NOT on the main shape (a candidate
+      // can have one new endpoint OR both new — e.g. an entirely separate
+      // branch sharing only mid-line stops with the main shape). Emit if
+      // any of those new terminals isn't already covered by a previously
+      // emitted extra; mark all of them covered together so the next
+      // candidate doesn't re-introduce one.
+      const newTerminals: string[] = [];
+      if (!mainStops.has(firstStop)) newTerminals.push(firstStop);
+      if (!mainStops.has(lastStop)) newTerminals.push(lastStop);
+      if (newTerminals.length === 0) continue;
+      if (newTerminals.every((t) => extraCovered.has(t))) continue;
+      for (const t of newTerminals) extraCovered.add(t);
       selected.push(c);
     }
   }
@@ -109,9 +115,15 @@ export function createStaticRouter(mode: Mode): Hono {
         if (seenShapes.has(shapeKey)) continue;
         seenShapes.add(shapeKey);
         const shape = gtfs.shapes[trip.shapeId];
-        if (!shape) continue;
+        if (!shape) {
+          console.warn(`[${mode}] /routes: shape ${trip.shapeId} referenced by trip ${trip.tripId} not found in shapes index — excluded`);
+          continue;
+        }
         const sequence = gtfs.stopSequences[shapeKey];
-        if (!sequence) continue;
+        if (!sequence) {
+          console.warn(`[${mode}] /routes: stop sequence missing for ${shapeKey} — excluded`);
+          continue;
+        }
         candidates.push({
           shapeId: trip.shapeId,
           routeId: trip.routeId,

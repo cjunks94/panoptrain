@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 
-const MOBILE_QUERY = "(max-width: 767px)";
+/** Shared breakpoint for "is this a phone-sized viewport". Exported so
+ *  callers initializing one-shot state at mount (e.g. `panelOpen` default
+ *  in App.tsx) hit the same breakpoint as the reactive hook below. */
+export const MOBILE_QUERY = "(max-width: 767px)";
 
 /** Reactive viewport check — flips if the user rotates a tablet or resizes
  *  desktop down to mobile widths. SSR-safe: returns false until mount.

@@ -114,6 +114,26 @@ describe("pickShapes", () => {
     expect(out.map((c) => c.shapeId).sort()).toEqual(["inw-far", "inw-lef"]);
   });
 
+  it("emits a shape whose BOTH endpoints are off the main shape", () => {
+    // Pin the both-endpoints-new branch: longest covers PENN→BAB; an
+    // entirely separate variant runs ATL→FAR sharing only the mid-line
+    // JAM stop. Without handling both-new, the second endpoint (FAR)
+    // wouldn't be tracked and a later FAR-terminating variant could be
+    // wrongly suppressed.
+    const longest = shape("penn-bab", "1", 0, ["PENN", "JAM", "BAB"], 100);
+    const bothNew = shape("atl-far", "1", 0, ["ATL", "JAM", "FAR"], 90);
+    const out = pickShapes([longest, bothNew]);
+    expect(out.map((c) => c.shapeId).sort()).toEqual(["atl-far", "penn-bab"]);
+  });
+
+  it("does not double-emit when a later variant repeats both already-covered new endpoints", () => {
+    const longest = shape("penn-bab", "1", 0, ["PENN", "JAM", "BAB"], 100);
+    const bothNew = shape("atl-far", "1", 0, ["ATL", "JAM", "FAR"], 90);
+    const repeats = shape("atl-far-2", "1", 0, ["ATL", "JAM", "FAR"], 80);
+    const out = pickShapes([longest, bothNew, repeats]);
+    expect(out.map((c) => c.shapeId).sort()).toEqual(["atl-far", "penn-bab"]);
+  });
+
   it("only emits one extra per distinct new terminal even when many variants reach it", () => {
     const longest = shape("a", "1", 0, ["P", "J", "B"], 100);
     const atl1 = shape("b", "1", 0, ["ATL", "J", "B"], 90);

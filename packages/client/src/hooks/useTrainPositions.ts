@@ -88,16 +88,25 @@ export function useTrainPositions(mode: Mode): UseTrainPositionsResult {
       if (document.visibilityState === "visible") start();
       else stop();
     };
-    const onResume = () => {
+    // pageshow fires on every page load, including the cold initial render
+    // — but the mount path above already calls start(), so re-running here
+    // would double-poll. Gate on e.persisted, which is true only when the
+    // page is restored from bfcache (the iOS back-button / app-switch
+    // return path that visibilitychange misses).
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (!e.persisted) return;
+      if (document.visibilityState !== "hidden") start();
+    };
+    const onFocus = () => {
       if (document.visibilityState !== "hidden") start();
     };
     document.addEventListener("visibilitychange", onVisChange);
-    window.addEventListener("pageshow", onResume);
-    window.addEventListener("focus", onResume);
+    window.addEventListener("pageshow", onPageShow);
+    window.addEventListener("focus", onFocus);
     return () => {
       document.removeEventListener("visibilitychange", onVisChange);
-      window.removeEventListener("pageshow", onResume);
-      window.removeEventListener("focus", onResume);
+      window.removeEventListener("pageshow", onPageShow);
+      window.removeEventListener("focus", onFocus);
       stop();
     };
   }, [poll]);
