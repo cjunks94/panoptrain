@@ -587,7 +587,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
             id="train-rim"
             type="symbol"
             layout={{
-              "icon-image": ["case", ["get", "isExpress"], "marker-square", "marker-circle"],
+              "icon-image": ["get", "iconImage"],
               "icon-size": 0.55,
               "icon-allow-overlap": true,
               "icon-ignore-placement": true,
@@ -604,13 +604,15 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
             }}
           />
         )}
-        {/* Route bullet — colored circle (local) or square (express) with route letter */}
+        {/* Route bullet — colored shape with route label inside. Both
+            iconImage (circle/square) and label come from per-mode feature
+            properties so the layer config is mode-agnostic. */}
         {iconsReady && (
           <Layer
             id="train-markers"
             type="symbol"
             layout={{
-              "icon-image": ["case", ["get", "isExpress"], "marker-square", "marker-circle"],
+              "icon-image": ["get", "iconImage"],
               "icon-size": 0.5,
               "icon-allow-overlap": true,
               "icon-ignore-placement": true,
@@ -620,7 +622,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
                 0, ["literal", [0, 0]],
                 3, ["literal", [156, 0]],
               ] as any,
-              "text-field": ["get", "routeId"],
+              "text-field": ["get", "label"],
               "text-size": 11,
               "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
               "text-allow-overlap": true,

@@ -1,15 +1,58 @@
 import { ROUTE_INFO, LIRR_ROUTE_GROUPS } from "@panoptrain/shared";
 import type { Mode } from "@panoptrain/shared";
 
-const DEFAULT_INFO = { color: "#808183", textColor: "#FFFFFF", isExpress: false };
+/** Identifier shown inside the train bullet on the map. For subway this is
+ *  the route_id itself ("1", "L", "FX"). For LIRR — where riders never see
+ *  the numeric GTFS IDs — we render a 2-letter branch abbreviation instead.
+ *  Matches the marker shape's icon dimensions so 2 chars fit comfortably. */
+const LIRR_LABELS: Record<string, string> = {
+  "1": "BB",  // Babylon
+  "2": "HM",  // Hempstead
+  "3": "OB",  // Oyster Bay
+  "4": "RK",  // Ronkonkoma
+  "5": "MT",  // Montauk
+  "6": "LB",  // Long Beach
+  "7": "FR",  // Far Rockaway
+  "8": "WH",  // West Hempstead
+  "9": "PW",  // Port Washington
+  "10": "PJ", // Port Jefferson (covers Huntington electric service too)
+  "11": "BP", // Belmont Park
+  "12": "CT", // City Terminal Zone
+  "13": "GP", // Greenport
+};
 
-/** routeId -> color/text for LIRR. LIRR doesn't have express service so
- *  isExpress is always false; text contrast on each branch color was picked
- *  to match the official MTA palette. */
-const LIRR_LOOKUP: Record<string, { color: string; textColor: string; isExpress: boolean }> = {};
+/** Marker glyph identifier emitted from useTrainFeatures and read by the
+ *  map's symbol layer. Replaces the subway-flavoured `isExpress` boolean
+ *  that used to leak into the layer config — modes can introduce their own
+ *  shape variants without the layer needing to know about them. */
+export type MarkerShape = "circle" | "square";
+
+export interface RouteRender {
+  color: string;
+  textColor: string;
+  /** Text rendered inside the marker bullet — branch abbrev for LIRR,
+   *  route ID for subway. */
+  label: string;
+  /** Which SDF icon the marker layer should render. */
+  markerShape: MarkerShape;
+}
+
+const DEFAULT_RENDER: RouteRender = {
+  color: "#808183",
+  textColor: "#FFFFFF",
+  label: "?",
+  markerShape: "circle",
+};
+
+const LIRR_LOOKUP: Record<string, RouteRender> = {};
 for (const g of LIRR_ROUTE_GROUPS) {
   for (const id of g.routes) {
-    LIRR_LOOKUP[id] = { color: g.color, textColor: pickTextColor(g.color), isExpress: false };
+    LIRR_LOOKUP[id] = {
+      color: g.color,
+      textColor: pickTextColor(g.color),
+      label: LIRR_LABELS[id] ?? id,
+      markerShape: "circle",
+    };
   }
 }
 
@@ -22,14 +65,19 @@ function pickTextColor(hex: string): string {
   return luminance > 0.6 ? "#121212" : "#FFFFFF";
 }
 
-export function getRouteInfo(
-  routeId: string,
-  mode: Mode = "subway",
-): { color: string; textColor: string; isExpress: boolean } {
+/** `mode` is required so call sites can't accidentally fall back to subway
+ *  styling on an LIRR (or future mode) train. The TS compiler catches every
+ *  call boundary; default-arg semantics would silently degrade. */
+export function getRouteInfo(routeId: string, mode: Mode): RouteRender {
   if (mode === "lirr") {
-    return LIRR_LOOKUP[routeId] ?? DEFAULT_INFO;
+    return LIRR_LOOKUP[routeId] ?? DEFAULT_RENDER;
   }
   const info = ROUTE_INFO[routeId];
-  if (!info) return DEFAULT_INFO;
-  return { color: info.color, textColor: info.textColor, isExpress: info.isExpress };
+  if (!info) return DEFAULT_RENDER;
+  return {
+    color: info.color,
+    textColor: info.textColor,
+    label: info.name,
+    markerShape: info.isExpress ? "square" : "circle",
+  };
 }

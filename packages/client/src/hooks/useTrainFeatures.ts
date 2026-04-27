@@ -9,7 +9,10 @@ const POLL_INTERVAL = parseInt(import.meta.env.VITE_POLL_INTERVAL_MS ?? "30000",
 export interface TrainInfo extends TrainPosition {
   color: string;
   textColor: string;
-  isExpress: boolean;
+  /** Bullet text — "1" for subway, "BB" / "PJ" / etc. for LIRR branches. */
+  label: string;
+  /** SDF icon name the marker layer should render. */
+  iconImage: "marker-circle" | "marker-square";
 }
 
 interface FeatureProps {
@@ -17,7 +20,8 @@ interface FeatureProps {
   routeId: string;
   color: string;
   textColor: string;
-  isExpress: boolean;
+  label: string;
+  iconImage: "marker-circle" | "marker-square";
   direction: number;
   bearing: number;
   status: string;
@@ -146,7 +150,8 @@ export function useTrainFeatures(
           routeId: t.routeId,
           color: info.color,
           textColor: info.textColor,
-          isExpress: info.isExpress,
+          label: info.label,
+          iconImage: info.markerShape === "square" ? "marker-square" : "marker-circle",
           direction: t.direction,
           bearing: t.bearing ?? (t.direction === 0 ? 0 : 180),
           status: t.status,
@@ -186,7 +191,13 @@ export function useTrainFeatures(
     // Update popup-lookup trains (triggers one React render)
     setTrains(deduped.map((t) => {
       const info = getRouteInfo(t.routeId, mode);
-      return { ...t, color: info.color, textColor: info.textColor, isExpress: info.isExpress };
+      return {
+        ...t,
+        color: info.color,
+        textColor: info.textColor,
+        label: info.label,
+        iconImage: info.markerShape === "square" ? "marker-square" : "marker-circle" as const,
+      };
     }));
   }, [data, visibleRoutes, planRouteIds, mode]);
 
