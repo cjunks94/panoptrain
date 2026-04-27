@@ -100,7 +100,3 @@ export function createStaticRouter(mode: Mode): Hono {
 
   return staticRoutes;
 }
-
-// Subway router as the default export keeps the legacy /api routes working.
-const subwayStatic = createStaticRouter("subway");
-export default subwayStatic;

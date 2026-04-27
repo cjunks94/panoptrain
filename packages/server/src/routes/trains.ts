@@ -41,7 +41,3 @@ export function createTrainsRouter(mode: Mode): Hono {
 
   return trains;
 }
-
-// Subway router as the default export keeps existing /api/trains working.
-const subwayTrains = createTrainsRouter("subway");
-export default subwayTrains;

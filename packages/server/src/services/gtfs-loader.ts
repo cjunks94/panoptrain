@@ -14,8 +14,9 @@ function dataDirFor(mode: Mode): string {
 function loadJson<T>(mode: Mode, filename: string): T {
   const path = join(dataDirFor(mode), filename);
   if (!existsSync(path)) {
+    const cmd = mode === "subway" ? "pnpm download-gtfs" : `pnpm download-gtfs:${mode}`;
     throw new Error(
-      `Missing ${filename} for ${mode}. Run "pnpm download-gtfs ${mode === "subway" ? "" : mode}" to download and process static GTFS data.`,
+      `Missing ${filename} for ${mode}. Run "${cmd}" to download and process static GTFS data.`,
     );
   }
   return JSON.parse(readFileSync(path, "utf-8")) as T;

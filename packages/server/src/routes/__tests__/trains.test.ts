@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { updateCache } from "../../services/cache.js";
-import trains from "../trains.js";
+import { createTrainsRouter } from "../trains.js";
 import type { TrainPosition, TrainsResponse } from "@panoptrain/shared";
+
+const trains = createTrainsRouter("subway");
 
 function makeTrain(overrides: Partial<TrainPosition> = {}): TrainPosition {
   return {

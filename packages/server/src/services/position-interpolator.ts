@@ -125,8 +125,9 @@ function getLine(shapeId: string, gtfs: StaticGtfsData): LineData | null {
 /** Backfill routeId / directionId from static GTFS when the realtime feed
  *  doesn't supply them. The LIRR feed leaves trip.routeId empty in the
  *  protobuf even though the tripId matches a static trip — without this,
- *  every LIRR train would have routeId="" and fail shape lookup. */
-function enrichWithStatic<T extends { tripId: string; routeId: string; directionId: number }>(
+ *  every LIRR train would have routeId="" and fail shape lookup. Exported
+ *  for unit tests. */
+export function enrichWithStatic<T extends { tripId: string; routeId: string; directionId: number }>(
   entry: T,
   gtfs: StaticGtfsData,
 ): T {

@@ -49,6 +49,7 @@ async function pollFeeds(mode: Mode, gtfs: StaticGtfsData): Promise<void> {
     const allVehicles: ParsedVehicle[] = [];
     const allTripUpdates: ParsedTripUpdate[] = [];
     let successCount = 0;
+    let failCount = 0;
 
     for (const result of results) {
       if (result.status === "fulfilled") {
@@ -56,6 +57,7 @@ async function pollFeeds(mode: Mode, gtfs: StaticGtfsData): Promise<void> {
         allVehicles.push(...result.value.vehicles);
         allTripUpdates.push(...result.value.tripUpdates);
       } else {
+        failCount++;
         console.warn(`${mode} feed error: ${result.reason}`);
       }
     }
@@ -64,8 +66,9 @@ async function pollFeeds(mode: Mode, gtfs: StaticGtfsData): Promise<void> {
     updateCache(mode, trains);
 
     const elapsed = Date.now() - startTime;
+    const failSuffix = failCount > 0 ? `, ${failCount} failed` : "";
     console.log(
-      `Poll ${mode} in ${elapsed}ms: ${successCount}/${feeds.length} feeds ok, ` +
+      `Poll ${mode} in ${elapsed}ms: ${successCount}/${feeds.length} feeds ok${failSuffix}, ` +
         `${allVehicles.length} vehicles, ${allTripUpdates.length} trip updates, ` +
         `${trains.length} positioned trains`,
     );

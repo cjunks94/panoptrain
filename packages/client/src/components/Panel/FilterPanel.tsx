@@ -237,6 +237,7 @@ export function FilterPanel({
           </>
         )}
         {mode === "lirr" && (
+          // Spacer; route filters are subway-only until PT-506 ships LIRR groups.
           <div style={{ flex: 1 }} />
         )}
       </div>
