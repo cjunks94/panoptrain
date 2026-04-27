@@ -22,12 +22,6 @@ export function useTrainPositions(): UseTrainPositionsResult {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const poll = useCallback(async () => {
-    // Skip the network round-trip when the tab isn't visible — the user
-    // can't see the trains anyway, and we'll grab fresh data the moment
-    // they switch back. Saves bandwidth and battery on long-idle tabs.
-    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-      return;
-    }
     try {
       const result = await fetchTrains();
       setData(result);
@@ -39,23 +33,40 @@ export function useTrainPositions(): UseTrainPositionsResult {
     }
   }, []);
 
+  // Start/stop the polling interval based on tab visibility (PT-105). When
+  // hidden we tear the interval down completely (no idle timer firing every
+  // 30s on a background tab); when visible we poll once immediately for fresh
+  // data, then restart the interval so cadence is clean rather than racing
+  // a partially-elapsed timer.
   useEffect(() => {
-    poll();
-    intervalRef.current = setInterval(poll, POLL_INTERVAL);
-    return () => {
+    const start = () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
+      poll();
+      intervalRef.current = setInterval(poll, POLL_INTERVAL);
     };
-  }, [poll]);
+    const stop = () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
 
-  // When the tab becomes visible again, immediately refresh so users don't
-  // see stale positions while waiting for the next interval tick (PT-105).
-  useEffect(() => {
-    if (typeof document === "undefined") return;
+    const isHidden = typeof document !== "undefined" && document.visibilityState === "hidden";
+    if (isHidden) stop();
+    else start();
+
+    if (typeof document === "undefined") {
+      return stop;
+    }
     const onVisChange = () => {
-      if (document.visibilityState === "visible") poll();
+      if (document.visibilityState === "visible") start();
+      else stop();
     };
     document.addEventListener("visibilitychange", onVisChange);
-    return () => document.removeEventListener("visibilitychange", onVisChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisChange);
+      stop();
+    };
   }, [poll]);
 
   // Check staleness

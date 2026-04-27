@@ -11,7 +11,6 @@ interface UseRouteShapesResult {
 export function useRouteShapes(): UseRouteShapesResult {
   const [routeShapes, setRouteShapes] = useState<RoutesGeoJSON | null>(null);
   const [stopsGeoJson, setStopsGeoJson] = useState<StopsGeoJSON | null>(null);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -26,14 +25,18 @@ export function useRouteShapes(): UseRouteShapesResult {
 
     fetchRoutes()
       .then((routes) => { if (!cancelled) setRouteShapes(routes); })
-      .catch((err) => console.error("Failed to load routes:", err))
-      .finally(() => { if (!cancelled) setLoading(false); });
+      .catch((err) => console.error("Failed to load routes:", err));
 
     return () => {
       cancelled = true;
     };
   }, []);
 
+  // Derive `loading` from state so it accurately reflects "any payload still
+  // pending". With the parallel-fetch pattern a single useState flag would
+  // either lie (flips early when one fetch finishes) or hang forever (waits
+  // only for one). Consumers can also gate on the individual values directly.
+  const loading = routeShapes === null || stopsGeoJson === null;
   return { routeShapes, stopsGeoJson, loading };
 }
 

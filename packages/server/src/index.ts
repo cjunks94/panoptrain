@@ -23,6 +23,10 @@ app.use("/*", cors({ origin: "*" }));
 // gzip/deflate JSON API responses (PT-103). Default 1024 byte threshold means
 // tiny endpoints like /api/health pass through uncompressed. /api/trains and
 // /api/routes shrink ~70% — the route GeoJSON in particular is multi-MB.
+//
+// Ordering: any middleware that mutates the response body MUST be registered
+// BEFORE compress() — mutations after compression would corrupt the gzipped
+// bytes. CORS only sets headers, so it's safely ordered above.
 app.use("/api/*", compress());
 
 // Health check
