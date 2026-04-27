@@ -118,6 +118,20 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     setIconsReady(true);
   }, []);
 
+  // Keep train layers on top of everything else. The trains <Source> is
+  // unconditional and mounts at t=0, but routes/stops/plan-* sources are
+  // conditional and mount later once their data arrives — MapLibre adds new
+  // layers above existing ones, so without this re-promotion the route
+  // lines, stations, and plan halos would render OVER the train markers
+  // until the user reloaded the page.
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    if (!map) return;
+    for (const id of ["train-glow", "train-rim", "train-markers", "train-carets"]) {
+      if (map.getLayer(id)) map.moveLayer(id);
+    }
+  }, [routeShapes, stops, planRoute, iconsReady]);
+
   // Auto-fit the viewport to the active mode's network on mode switch (PT-507).
   // Subway → NYC; LIRR → Long Island. Without this, switching to LIRR leaves
   // the user staring at Manhattan with the network entirely off-screen.
