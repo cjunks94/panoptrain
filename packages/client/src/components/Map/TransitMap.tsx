@@ -98,14 +98,24 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
   // Auto-fit the viewport to the active mode's network on mode switch (PT-507).
   // Subway → NYC; LIRR → Long Island. Without this, switching to LIRR leaves
   // the user staring at Manhattan with the network entirely off-screen.
-  // Skipped on the very first load so the configured initialViewState wins.
-  const initialFit = useRef(true);
+  //
+  // Track which mode we last fit, not whether the effect has fired. The
+  // earlier "fired-once" guard tripped on mount with routeShapes=null, then
+  // ran for real once routes loaded — overriding initialViewState. Using
+  // a mode ref means the initial mode just records itself the first time
+  // its routes arrive (no fit), and only subsequent mode changes trigger a
+  // fit.
+  const lastFitMode = useRef<Mode | null>(null);
   useEffect(() => {
-    if (initialFit.current) {
-      initialFit.current = false;
+    if (!routeShapes || routeShapes.features.length === 0) return;
+    if (lastFitMode.current === null) {
+      // First time we have routes — record this as the seed mode and let
+      // initialViewState own the camera.
+      lastFitMode.current = mode;
       return;
     }
-    if (!routeShapes || routeShapes.features.length === 0) return;
+    if (lastFitMode.current === mode) return;
+
     const map = mapRef.current?.getMap();
     if (!map) return;
     let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
@@ -123,6 +133,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
       duration: 800,
       maxZoom: 12,
     });
+    lastFitMode.current = mode;
   }, [mode, routeShapes]);
 
   // Auto-fit the viewport to the planned route so users immediately see the
@@ -393,24 +404,30 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
               // bucket (0/1/2). Per-mode thresholds live server-side so
               // subway's "8+ routes = hub" logic doesn't dictate LIRR
               // (where Jamaica + Penn matter regardless of count).
+              //
+              // `coalesce` defaults missing `importance` to 0 — the field
+              // was added in this PR and /api/<mode>/stops is cached for
+              // 24h; any client with a pre-deploy cached payload would
+              // otherwise see every == check evaluate false and render
+              // every station at the smallest size.
               "circle-radius": [
                 "interpolate", ["linear"], ["zoom"],
                 11, [
                   "case",
-                  ["==", ["get", "importance"], 2], 4,
-                  ["==", ["get", "importance"], 1], 2.5,
+                  ["==", ["coalesce", ["get", "importance"], 0], 2], 4,
+                  ["==", ["coalesce", ["get", "importance"], 0], 1], 2.5,
                   2,
                 ],
                 14, [
                   "case",
-                  ["==", ["get", "importance"], 2], 7,
-                  ["==", ["get", "importance"], 1], 5,
+                  ["==", ["coalesce", ["get", "importance"], 0], 2], 7,
+                  ["==", ["coalesce", ["get", "importance"], 0], 1], 5,
                   4,
                 ],
                 16, [
                   "case",
-                  ["==", ["get", "importance"], 2], 9,
-                  ["==", ["get", "importance"], 1], 7,
+                  ["==", ["coalesce", ["get", "importance"], 0], 2], 9,
+                  ["==", ["coalesce", ["get", "importance"], 0], 1], 7,
                   6,
                 ],
               ],
@@ -424,14 +441,14 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
                 "interpolate", ["linear"], ["zoom"],
                 11, [
                   "case",
-                  ["==", ["get", "importance"], 2], 2,
-                  ["==", ["get", "importance"], 1], 1.5,
+                  ["==", ["coalesce", ["get", "importance"], 0], 2], 2,
+                  ["==", ["coalesce", ["get", "importance"], 0], 1], 1.5,
                   1,
                 ],
                 14, [
                   "case",
-                  ["==", ["get", "importance"], 2], 2.5,
-                  ["==", ["get", "importance"], 1], 1.8,
+                  ["==", ["coalesce", ["get", "importance"], 0], 2], 2.5,
+                  ["==", ["coalesce", ["get", "importance"], 0], 1], 1.8,
                   1.2,
                 ],
               ],
@@ -439,7 +456,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
               // bright halo for hubs to make them visually "premium".
               "circle-stroke-color": [
                 "case",
-                ["==", ["get", "importance"], 2], "#ffffff",
+                ["==", ["coalesce", ["get", "importance"], 0], 2], "#ffffff",
                 "#0a0a1a",
               ],
               "circle-stroke-opacity": 1,
@@ -457,7 +474,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
             type="symbol"
             minzoom={12}
             maxzoom={14}
-            filter={[">=", ["get", "importance"], 1]}
+            filter={[">=", ["coalesce", ["get", "importance"], 0], 1]}
             layout={{
               "text-field": ["get", "stopName"],
               "text-size": [
@@ -470,7 +487,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
               "text-anchor": "top",
               "text-max-width": 8,
               "text-optional": true,
-              "symbol-sort-key": ["-", 0, ["get", "importance"]],
+              "symbol-sort-key": ["-", 0, ["coalesce", ["get", "importance"], 0]],
             }}
             paint={{
               "text-color": "#d8d8e0",
@@ -503,7 +520,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
               "text-anchor": "top",
               "text-max-width": 10,
               "text-optional": true,
-              "symbol-sort-key": ["-", 0, ["get", "importance"]],
+              "symbol-sort-key": ["-", 0, ["coalesce", ["get", "importance"], 0]],
             }}
             paint={{
               "text-color": "#d8d8e0",

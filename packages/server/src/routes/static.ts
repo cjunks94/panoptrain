@@ -20,8 +20,9 @@ const LIRR_MAJOR_HUBS = new Set([
 /** Map a stop to a 0/1/2 importance bucket. Subway uses the existing
  *  routeCount thresholds (8+ = hub, 4+ = mid). LIRR uses a curated hub list
  *  and treats every other stop as importance 1, since the network is
- *  geographically sparse and riders need labels at wider zooms than subway. */
-function stationImportance(mode: Mode, stopName: string, routeCount: number): 0 | 1 | 2 {
+ *  geographically sparse and riders need labels at wider zooms than subway.
+ *  Exported for unit tests. */
+export function stationImportance(mode: Mode, stopName: string, routeCount: number): 0 | 1 | 2 {
   if (mode === "lirr") {
     if (LIRR_MAJOR_HUBS.has(stopName)) return 2;
     return 1;

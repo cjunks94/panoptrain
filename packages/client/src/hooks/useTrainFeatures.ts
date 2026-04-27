@@ -54,8 +54,8 @@ export function useTrainFeatures(
   data: TrainsResponse | null,
   visibleRoutes: Set<string>,
   routeShapes: RoutesGeoJSON | null,
-  planRouteIds: Set<string> | null = null,
-  mode: Mode = "subway",
+  planRouteIds: Set<string> | null,
+  mode: Mode,
 ) {
   const geojsonRef = useRef(EMPTY_FC);
   const prevPositions = useRef(new Map<string, [number, number]>());
