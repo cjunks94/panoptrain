@@ -69,9 +69,17 @@ interface PopupInfo {
 export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, stops, planRoute, planRouteIds, mode, panelOpen }: TransitMapProps) {
   const [popup, setPopup] = useState<PopupInfo | null>(null);
   const [iconsReady, setIconsReady] = useState(false);
+  const [followTripId, setFollowTripId] = useState<string | null>(null);
   const mapRef = useRef<MapRef>(null);
   const isMobile = useIsMobile();
   const viewportHeight = useViewportHeight();
+
+  // Tracking ref so the RAF loop's stable closure can always read the latest
+  // follow target without needing to re-bind the effect on every change.
+  const followTripIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    followTripIdRef.current = followTripId;
+  }, [followTripId]);
 
   // fitBounds padding compensates for whichever piece of UI covers the map.
   // The mobile bottom-sheet padding is computed from the live viewport
@@ -87,7 +95,11 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     [isMobile, panelOpen, viewportHeight],
   );
 
-  // RAF loop — interpolates coordinates and pushes directly to MapLibre (no React renders)
+  // RAF loop — interpolates coordinates and pushes directly to MapLibre (no
+  // React renders). When a train is followed, also re-center the camera on
+  // it each frame so the user sees a smooth chase. setCenter (vs panTo) is
+  // intentional: we already have a 15fps interpolated position and panTo's
+  // own ease curve would fight that, producing visible stutter.
   useEffect(() => {
     let rafId = 0;
     let lastFrame = 0;
@@ -102,6 +114,16 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
         if (source && "setData" in source) {
           (source as { setData: (data: GeoJSON.FeatureCollection) => void }).setData(geojsonRef.current);
         }
+        const followId = followTripIdRef.current;
+        if (map && followId) {
+          const feature = geojsonRef.current.features.find(
+            (f) => f.properties?.tripId === followId,
+          );
+          if (feature && feature.geometry.type === "Point") {
+            const [lon, lat] = feature.geometry.coordinates as [number, number];
+            map.setCenter([lon, lat]);
+          }
+        }
       }
       rafId = requestAnimationFrame(animate);
     };
@@ -109,6 +131,30 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     rafId = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(rafId);
   }, [geojsonRef, interpolateFrame]);
+
+  // User dragging the map breaks follow. dragstart fires only on user input,
+  // not on programmatic setCenter, so we don't have to debounce or filter.
+  // Wheel/zoom intentionally don't break follow — user might want to zoom
+  // in on the chased train.
+  useEffect(() => {
+    if (!followTripId) return;
+    const map = mapRef.current?.getMap();
+    if (!map) return;
+    const stop = () => setFollowTripId(null);
+    map.on("dragstart", stop);
+    return () => {
+      map.off("dragstart", stop);
+    };
+  }, [followTripId]);
+
+  // If the followed train falls out of the snapshot (5min stale eviction,
+  // route filter, mode switch), clear follow so the camera doesn't lock to
+  // the last known position forever.
+  useEffect(() => {
+    if (!followTripId) return;
+    const stillThere = trains.some((t) => t.tripId === followTripId);
+    if (!stillThere) setFollowTripId(null);
+  }, [trains, followTripId]);
 
   const handleMapLoad = useCallback((e: { target: ReturnType<MapRef["getMap"]> }) => {
     const map = e.target;
@@ -743,7 +789,13 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
         <Popup
           longitude={popup.lng}
           latitude={popup.lat}
-          onClose={() => setPopup(null)}
+          onClose={() => {
+            setPopup(null);
+            // Closing the popup is an explicit "I'm done with this train"
+            // signal — stop following too, otherwise the camera keeps
+            // chasing a train the user can't see details on anymore.
+            setFollowTripId(null);
+          }}
           anchor="bottom"
           closeButton={true}
           closeOnClick={false}
@@ -781,6 +833,30 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
                   : `${Math.abs(Math.round(popup.train.delay / 60))} min early`}
               </div>
             )}
+            {(() => {
+              const following = followTripId === popup.train.tripId;
+              return (
+                <button
+                  onClick={() => setFollowTripId(following ? null : popup.train.tripId)}
+                  style={{
+                    marginTop: 8,
+                    width: "100%",
+                    minHeight: 36,
+                    padding: "0 10px",
+                    background: following ? "#1a1a2e" : popup.train.color,
+                    color: following ? "#fff" : "#fff",
+                    border: "none",
+                    borderRadius: 6,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  {following ? "Stop following" : "Follow this train"}
+                </button>
+              );
+            })()}
           </div>
         </Popup>
       )}
