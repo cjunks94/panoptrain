@@ -30,8 +30,8 @@ async function fetch(path: string): Promise<TrainsResponse> {
 
 describe("GET /api/trains", () => {
   beforeEach(() => {
-    updateCache([]);
-    updateCache([]);
+    updateCache("subway",[]);
+    updateCache("subway",[]);
   });
 
   it("returns empty array when no data", async () => {
@@ -41,14 +41,14 @@ describe("GET /api/trains", () => {
   });
 
   it("returns all trains from cache", async () => {
-    updateCache([makeTrain({ tripId: "a" }), makeTrain({ tripId: "b" })]);
+    updateCache("subway",[makeTrain({ tripId: "a" }), makeTrain({ tripId: "b" })]);
     const data = await fetch("/");
     expect(data.count).toBe(2);
     expect(data.trains.map((t) => t.tripId)).toEqual(["a", "b"]);
   });
 
   it("filters by route query param", async () => {
-    updateCache([
+    updateCache("subway",[
       makeTrain({ tripId: "a", routeId: "1" }),
       makeTrain({ tripId: "b", routeId: "A" }),
       makeTrain({ tripId: "c", routeId: "1" }),
@@ -59,7 +59,7 @@ describe("GET /api/trains", () => {
   });
 
   it("filters by multiple routes", async () => {
-    updateCache([
+    updateCache("subway",[
       makeTrain({ tripId: "a", routeId: "1" }),
       makeTrain({ tripId: "b", routeId: "A" }),
       makeTrain({ tripId: "c", routeId: "7" }),
@@ -71,7 +71,7 @@ describe("GET /api/trains", () => {
 
   it("evicts trains older than TTL (5 minutes)", async () => {
     const now = Math.floor(Date.now() / 1000);
-    updateCache([
+    updateCache("subway",[
       makeTrain({ tripId: "fresh", updatedAt: now - 60 }),   // 1 min old
       makeTrain({ tripId: "stale", updatedAt: now - 600 }),  // 10 min old
     ]);
@@ -81,7 +81,7 @@ describe("GET /api/trains", () => {
   });
 
   it("route filter is case-insensitive", async () => {
-    updateCache([makeTrain({ tripId: "a", routeId: "A" })]);
+    updateCache("subway",[makeTrain({ tripId: "a", routeId: "A" })]);
     const data = await fetch("/?routes=a");
     expect(data.count).toBe(1);
   });

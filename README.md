@@ -11,7 +11,8 @@ Real-time NYC subway train tracker. Polls MTA GTFS-RT feeds, interpolates train 
 
 ```bash
 pnpm install
-pnpm download-gtfs   # downloads static MTA subway data (~one-time)
+pnpm download-gtfs        # subway static GTFS (~one-time)
+pnpm download-gtfs:lirr   # LIRR static GTFS (optional — needed for the LIRR tab)
 ```
 
 **No API key required** — MTA's GTFS-RT feeds are publicly accessible.
@@ -51,11 +52,15 @@ packages/
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /api/trains?routes=1,2,3` | Live train positions (optional route filter) |
-| `GET /api/routes` | Route GeoJSON (cached 24h) |
-| `GET /api/stops` | Stop GeoJSON (cached 24h) |
-| `GET /api/plan?from=X&to=Y` | Trip plan between two stops |
+| `GET /api/subway/trains?routes=1,2,3` | Live subway train positions |
+| `GET /api/subway/routes` | Subway route GeoJSON (cached 24h) |
+| `GET /api/subway/stops` | Subway stop GeoJSON (cached 24h) |
+| `GET /api/lirr/trains` | Live LIRR train positions |
+| `GET /api/lirr/routes` | LIRR route GeoJSON (cached 24h) |
+| `GET /api/lirr/stops` | LIRR stop GeoJSON (cached 24h) |
+| `GET /api/plan?from=X&to=Y` | Trip plan between two subway stops (subway-only) |
 | `GET /api/health` | Health check |
+| `GET /api/trains` etc. | Legacy aliases for the subway endpoints (kept for back-compat) |
 
 ## Roadmap
 

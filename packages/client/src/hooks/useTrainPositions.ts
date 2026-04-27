@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import type { TrainsResponse } from "@panoptrain/shared";
+import type { Mode, TrainsResponse } from "@panoptrain/shared";
 import { fetchTrains } from "../lib/api.js";
 
 // Injected by vite.config.ts from the repo-root POLL_INTERVAL_MS env var so
@@ -14,16 +14,24 @@ interface UseTrainPositionsResult {
   error: Error | null;
 }
 
-export function useTrainPositions(): UseTrainPositionsResult {
+export function useTrainPositions(mode: Mode): UseTrainPositionsResult {
   const [data, setData] = useState<TrainsResponse | null>(null);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [isStale, setIsStale] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Clear stale data when the mode flips so we don't briefly show subway
+  // trains while the LIRR fetch is in flight.
+  useEffect(() => {
+    setData(null);
+    setLastUpdated(null);
+    setIsStale(false);
+  }, [mode]);
+
   const poll = useCallback(async () => {
     try {
-      const result = await fetchTrains();
+      const result = await fetchTrains(mode);
       setData(result);
       setLastUpdated(Date.now());
       setIsStale(false);
@@ -31,7 +39,7 @@ export function useTrainPositions(): UseTrainPositionsResult {
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)));
     }
-  }, []);
+  }, [mode]);
 
   // Start/stop the polling interval based on tab visibility (PT-105). When
   // hidden we tear the interval down completely (no idle timer firing every

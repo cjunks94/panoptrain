@@ -1,22 +1,30 @@
-import type { TrainPosition } from "@panoptrain/shared";
+import type { TrainPosition, Mode } from "@panoptrain/shared";
 
 interface Snapshot {
   timestamp: number;
   trains: TrainPosition[];
 }
 
-let current: Snapshot | null = null;
-let previous: Snapshot | null = null;
-
-export function updateCache(trains: TrainPosition[]): void {
-  previous = current;
-  current = { timestamp: Date.now(), trains };
+interface ModeSnapshots {
+  current: Snapshot | null;
+  previous: Snapshot | null;
 }
 
-export function getCurrentSnapshot(): Snapshot | null {
-  return current;
+const snapshots: Record<Mode, ModeSnapshots> = {
+  subway: { current: null, previous: null },
+  lirr: { current: null, previous: null },
+};
+
+export function updateCache(mode: Mode, trains: TrainPosition[]): void {
+  const s = snapshots[mode];
+  s.previous = s.current;
+  s.current = { timestamp: Date.now(), trains };
 }
 
-export function getPreviousSnapshot(): Snapshot | null {
-  return previous;
+export function getCurrentSnapshot(mode: Mode): Snapshot | null {
+  return snapshots[mode].current;
+}
+
+export function getPreviousSnapshot(mode: Mode): Snapshot | null {
+  return snapshots[mode].previous;
 }

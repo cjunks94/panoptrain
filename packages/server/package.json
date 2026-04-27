@@ -8,6 +8,7 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "download-gtfs": "tsx scripts/download-gtfs.ts",
+    "download-gtfs:lirr": "tsx scripts/download-gtfs.ts lirr",
     "test": "vitest run",
     "test:watch": "vitest"
   },

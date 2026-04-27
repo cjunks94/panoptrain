@@ -10,7 +10,8 @@ packages/e2e/blob-report/
 packages/e2e/.playwright-cache/
 
 # GTFS data (downloaded, not committed)
-packages/server/src/data/gtfs/*.json
+packages/server/src/data/gtfs/
+packages/server/src/data/gtfs-*/
 
 # IDE
 .vscode/

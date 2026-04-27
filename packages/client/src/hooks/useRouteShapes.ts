@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import type { RoutesGeoJSON, StopsGeoJSON } from "@panoptrain/shared";
+import type { Mode, RoutesGeoJSON, StopsGeoJSON } from "@panoptrain/shared";
 import { fetchRoutes, fetchStops } from "../lib/api.js";
 
 interface UseRouteShapesResult {
@@ -8,29 +8,34 @@ interface UseRouteShapesResult {
   loading: boolean;
 }
 
-export function useRouteShapes(): UseRouteShapesResult {
+export function useRouteShapes(mode: Mode): UseRouteShapesResult {
   const [routeShapes, setRouteShapes] = useState<RoutesGeoJSON | null>(null);
   const [stopsGeoJson, setStopsGeoJson] = useState<StopsGeoJSON | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
+    // Reset state on mode flip so we don't show subway shapes briefly while
+    // LIRR data is still loading.
+    setRouteShapes(null);
+    setStopsGeoJson(null);
+
     // Fetch stops and routes independently so each renders as soon as it's
     // ready (PT-104). The routes GeoJSON is multi-MB; previously Promise.all
     // held back the smaller stops payload until both resolved. With them
     // decoupled, station dots/labels appear well before the route lines.
-    fetchStops()
+    fetchStops(mode)
       .then((stops) => { if (!cancelled) setStopsGeoJson(enrichStops(stops)); })
       .catch((err) => console.error("Failed to load stops:", err));
 
-    fetchRoutes()
+    fetchRoutes(mode)
       .then((routes) => { if (!cancelled) setRouteShapes(routes); })
       .catch((err) => console.error("Failed to load routes:", err));
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [mode]);
 
   // Derive `loading` from state so it accurately reflects "any payload still
   // pending". With the parallel-fetch pattern a single useState flag would

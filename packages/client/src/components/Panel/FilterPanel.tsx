@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { ROUTE_GROUPS } from "@panoptrain/shared";
-import type { StopsGeoJSON, TripPlan, TrainPosition } from "@panoptrain/shared";
+import type { Mode, StopsGeoJSON, TripPlan, TrainPosition } from "@panoptrain/shared";
 import { LineToggle } from "./LineToggle.js";
 import { TripPlanner } from "./TripPlanner.js";
+import { ModeTabs } from "./ModeTabs.js";
 import { StatusBadge } from "../Layout/StatusBadge.js";
 
 const MOBILE_QUERY = "(max-width: 767px)";
@@ -26,6 +27,8 @@ function useIsMobile(): boolean {
 interface FilterPanelProps {
   open: boolean;
   onToggle: () => void;
+  mode: Mode;
+  onModeChange: (next: Mode) => void;
   visibleRoutes: Set<string>;
   onToggleRoute: (routeId: string) => void;
   onToggleGroup: (groupLabel: string) => void;
@@ -42,6 +45,8 @@ interface FilterPanelProps {
 export function FilterPanel({
   open,
   onToggle,
+  mode,
+  onModeChange,
   visibleRoutes,
   onToggleGroup,
   onAllOn,
@@ -172,44 +177,68 @@ export function FilterPanel({
           </div>
         </div>
 
-        {/* Trip planner */}
-        <TripPlanner stops={stops} liveTrains={liveTrains} onPlanFound={onPlanFound} />
+        {/* Mode tabs (PT-504) */}
+        <ModeTabs mode={mode} onChange={onModeChange} />
 
-        {/* Quick actions */}
-        <div
-          style={{
-            padding: "8px 16px",
-            display: "flex",
-            gap: 8,
-            borderBottom: "1px solid rgba(255,255,255,0.08)",
-          }}
-        >
-          <button onClick={onAllOn} style={quickBtnStyle}>
-            All On
-          </button>
-          <button onClick={onAllOff} style={quickBtnStyle}>
-            All Off
-          </button>
-        </div>
+        {/* Trip planner is subway-only for now (PT-508). LIRR is schedule-based
+            with peak/off-peak fares — its own future epic. */}
+        {mode === "subway" ? (
+          <TripPlanner stops={stops} liveTrains={liveTrains} onPlanFound={onPlanFound} />
+        ) : (
+          <div
+            style={{
+              padding: "12px 16px",
+              borderBottom: "1px solid rgba(255,255,255,0.08)",
+              fontSize: 11,
+              color: "#888",
+              fontStyle: "italic",
+            }}
+          >
+            Trip planning is subway-only for now. LIRR planning coming in a future release.
+          </div>
+        )}
 
-        {/* Line groups */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
-          {ROUTE_GROUPS.map((group) => {
-            const allVisible = group.routes.every((r) => visibleRoutes.has(r));
-            const someVisible = group.routes.some((r) => visibleRoutes.has(r));
+        {/* Quick actions + line groups are subway-only (ROUTE_GROUPS lists
+            subway lines). PT-506 will introduce LIRR_ROUTE_GROUPS. */}
+        {mode === "subway" && (
+          <>
+            <div
+              style={{
+                padding: "8px 16px",
+                display: "flex",
+                gap: 8,
+                borderBottom: "1px solid rgba(255,255,255,0.08)",
+              }}
+            >
+              <button onClick={onAllOn} style={quickBtnStyle}>
+                All On
+              </button>
+              <button onClick={onAllOff} style={quickBtnStyle}>
+                All Off
+              </button>
+            </div>
 
-            return (
-              <LineToggle
-                key={group.label}
-                label={group.label}
-                color={group.color}
-                active={allVisible}
-                partial={someVisible && !allVisible}
-                onToggle={() => onToggleGroup(group.label)}
-              />
-            );
-          })}
-        </div>
+            <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
+              {ROUTE_GROUPS.map((group) => {
+                const allVisible = group.routes.every((r) => visibleRoutes.has(r));
+                const someVisible = group.routes.some((r) => visibleRoutes.has(r));
+                return (
+                  <LineToggle
+                    key={group.label}
+                    label={group.label}
+                    color={group.color}
+                    active={allVisible}
+                    partial={someVisible && !allVisible}
+                    onToggle={() => onToggleGroup(group.label)}
+                  />
+                );
+              })}
+            </div>
+          </>
+        )}
+        {mode === "lirr" && (
+          <div style={{ flex: 1 }} />
+        )}
       </div>
     </>
   );

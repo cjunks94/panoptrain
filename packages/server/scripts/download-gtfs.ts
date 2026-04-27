@@ -1,7 +1,12 @@
 /**
- * Downloads NYC Subway static GTFS data and processes it into optimized JSON files.
+ * Downloads MTA static GTFS data (subway by default, or LIRR with `lirr` arg)
+ * and processes it into optimized JSON files.
  *
- * Outputs:
+ * Usage:
+ *   pnpm download-gtfs        # subway → packages/server/src/data/gtfs/
+ *   pnpm download-gtfs lirr   # LIRR   → packages/server/src/data/gtfs-lirr/
+ *
+ * Outputs (per mode):
  *   - stops.json: station locations indexed by stop_id
  *   - routes.json: route metadata
  *   - shapes.json: route polylines as GeoJSON-compatible coordinate arrays
@@ -11,13 +16,16 @@
 import { writeFileSync, mkdirSync } from "node:fs";
 import { parse } from "csv-parse/sync";
 import JSZip from "jszip";
-import { SUBWAY_GTFS_STATIC_URL } from "@panoptrain/shared";
-import along from "@turf/along";
-import length from "@turf/length";
+import { staticGtfsUrlForMode } from "@panoptrain/shared";
+import type { Mode } from "@panoptrain/shared";
 import nearestPointOnLine from "@turf/nearest-point-on-line";
 import { lineString, point } from "@turf/helpers";
 
-const OUT_DIR = new URL("../src/data/gtfs/", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1");
+const modeArg = process.argv[2];
+const MODE: Mode = modeArg === "lirr" ? "lirr" : "subway";
+const SUBDIR = MODE === "subway" ? "gtfs" : `gtfs-${MODE}`;
+const OUT_DIR = new URL(`../src/data/${SUBDIR}/`, import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1");
+const SOURCE_URL = staticGtfsUrlForMode(MODE);
 
 interface RawStop {
   stop_id: string;
@@ -60,8 +68,8 @@ interface RawStopTime {
 }
 
 async function main() {
-  console.log("Downloading GTFS static data...");
-  const res = await fetch(SUBWAY_GTFS_STATIC_URL);
+  console.log(`Downloading ${MODE} GTFS static data from ${SOURCE_URL}...`);
+  const res = await fetch(SOURCE_URL);
   if (!res.ok) throw new Error(`Failed to download: ${res.status}`);
   const buf = await res.arrayBuffer();
 

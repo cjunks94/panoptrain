@@ -32,14 +32,19 @@ jobs:
         if: matrix.task == 'test'
         uses: actions/cache@v4
         with:
-          path: packages/server/src/data/gtfs
-          key: gtfs-static-v1
+          path: |
+            packages/server/src/data/gtfs
+            packages/server/src/data/gtfs-lirr
+          key: gtfs-static-v2-subway-lirr
 
       - name: Download GTFS data if not cached
         if: matrix.task == 'test'
         run: |
           if [ ! -f packages/server/src/data/gtfs/stops.json ]; then
             pnpm download-gtfs
+          fi
+          if [ ! -f packages/server/src/data/gtfs-lirr/stops.json ]; then
+            pnpm download-gtfs:lirr
           fi
 
       - run: pnpm ${{ matrix.task }}
@@ -64,13 +69,18 @@ jobs:
       - name: Cache GTFS static data
         uses: actions/cache@v4
         with:
-          path: packages/server/src/data/gtfs
-          key: gtfs-static-v1
+          path: |
+            packages/server/src/data/gtfs
+            packages/server/src/data/gtfs-lirr
+          key: gtfs-static-v2-subway-lirr
 
       - name: Download GTFS data if not cached
         run: |
           if [ ! -f packages/server/src/data/gtfs/stops.json ]; then
             pnpm download-gtfs
+          fi
+          if [ ! -f packages/server/src/data/gtfs-lirr/stops.json ]; then
+            pnpm download-gtfs:lirr
           fi
 
       - name: Install Playwright browsers

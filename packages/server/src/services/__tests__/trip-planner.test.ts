@@ -151,7 +151,7 @@ describe("planTrips", () => {
 describe("enrichWithDelays", () => {
   // These tests mutate the shared train-snapshot cache, so reset to empty
   // afterwards so other tests aren't affected by leftover data.
-  afterEach(() => updateCache([]));
+  afterEach(() => updateCache("subway",[]));
 
   function fakeTrain(routeId: string, currentStopId: string, delay: number): TrainPosition {
     return {
@@ -180,7 +180,7 @@ describe("enrichWithDelays", () => {
     const routeId = rideSeg.routeId;
     expect(stopIds.length).toBeGreaterThanOrEqual(3);
 
-    updateCache([
+    updateCache("subway",[
       fakeTrain(routeId, stopIds[0], 60),
       fakeTrain(routeId, stopIds[1], 300),
       fakeTrain(routeId, stopIds[2], 0),
@@ -204,7 +204,7 @@ describe("enrichWithDelays", () => {
     const stopIds = rideSeg.stops.map((s) => s.stopId);
     const routeId = rideSeg.routeId;
 
-    updateCache([
+    updateCache("subway",[
       fakeTrain(routeId, stopIds[0], 0),
       fakeTrain(routeId, stopIds[1], 0),
       fakeTrain(routeId, stopIds[2], 600),
@@ -218,7 +218,7 @@ describe("enrichWithDelays", () => {
   });
 
   it("delay is null when no trains are observed on the segment", () => {
-    updateCache([]);
+    updateCache("subway",[]);
     const plan = planTrip(graph, gtfs, "127", "132");
     const ride = plan!.segments.find((s) => s.type === "ride");
     if (!ride || ride.type !== "ride") throw new Error("expected ride segment");
