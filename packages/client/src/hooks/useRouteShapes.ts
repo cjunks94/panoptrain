@@ -11,31 +11,32 @@ interface UseRouteShapesResult {
 export function useRouteShapes(): UseRouteShapesResult {
   const [routeShapes, setRouteShapes] = useState<RoutesGeoJSON | null>(null);
   const [stopsGeoJson, setStopsGeoJson] = useState<StopsGeoJSON | null>(null);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
 
-    async function load() {
-      try {
-        const [routes, stops] = await Promise.all([fetchRoutes(), fetchStops()]);
-        if (!cancelled) {
-          setRouteShapes(routes);
-          setStopsGeoJson(enrichStops(stops));
-        }
-      } catch (err) {
-        console.error("Failed to load static data:", err);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
+    // Fetch stops and routes independently so each renders as soon as it's
+    // ready (PT-104). The routes GeoJSON is multi-MB; previously Promise.all
+    // held back the smaller stops payload until both resolved. With them
+    // decoupled, station dots/labels appear well before the route lines.
+    fetchStops()
+      .then((stops) => { if (!cancelled) setStopsGeoJson(enrichStops(stops)); })
+      .catch((err) => console.error("Failed to load stops:", err));
 
-    load();
+    fetchRoutes()
+      .then((routes) => { if (!cancelled) setRouteShapes(routes); })
+      .catch((err) => console.error("Failed to load routes:", err));
+
     return () => {
       cancelled = true;
     };
   }, []);
 
+  // Derive `loading` from state so it accurately reflects "any payload still
+  // pending". With the parallel-fetch pattern a single useState flag would
+  // either lie (flips early when one fetch finishes) or hang forever (waits
+  // only for one). Consumers can also gate on the individual values directly.
+  const loading = routeShapes === null || stopsGeoJson === null;
   return { routeShapes, stopsGeoJson, loading };
 }
 

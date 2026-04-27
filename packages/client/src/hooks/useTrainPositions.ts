@@ -33,11 +33,39 @@ export function useTrainPositions(): UseTrainPositionsResult {
     }
   }, []);
 
+  // Start/stop the polling interval based on tab visibility (PT-105). When
+  // hidden we tear the interval down completely (no idle timer firing every
+  // 30s on a background tab); when visible we poll once immediately for fresh
+  // data, then restart the interval so cadence is clean rather than racing
+  // a partially-elapsed timer.
   useEffect(() => {
-    poll();
-    intervalRef.current = setInterval(poll, POLL_INTERVAL);
-    return () => {
+    const start = () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
+      poll();
+      intervalRef.current = setInterval(poll, POLL_INTERVAL);
+    };
+    const stop = () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+
+    const isHidden = typeof document !== "undefined" && document.visibilityState === "hidden";
+    if (isHidden) stop();
+    else start();
+
+    if (typeof document === "undefined") {
+      return stop;
+    }
+    const onVisChange = () => {
+      if (document.visibilityState === "visible") start();
+      else stop();
+    };
+    document.addEventListener("visibilitychange", onVisChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisChange);
+      stop();
     };
   }, [poll]);
 
