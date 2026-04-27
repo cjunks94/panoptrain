@@ -48,7 +48,8 @@ export function FilterPanel({
             border: "1px solid rgba(255,255,255,0.1)",
             borderRadius: 8,
             color: "#e0e0e0",
-            padding: "8px 12px",
+            padding: "0 16px",
+            minHeight: 44,
             cursor: "pointer",
             fontSize: 14,
             backdropFilter: "blur(8px)",
@@ -92,8 +93,14 @@ export function FilterPanel({
                 border: "none",
                 color: "#999",
                 cursor: "pointer",
-                fontSize: 18,
-                padding: 4,
+                fontSize: 22,
+                lineHeight: 1,
+                width: 44,
+                height: 44,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                marginRight: -8, // visually re-anchor without shrinking the tap target
               }}
             >
               ×
@@ -149,12 +156,13 @@ export function FilterPanel({
 
 const quickBtnStyle: React.CSSProperties = {
   flex: 1,
-  padding: "6px 0",
+  minHeight: 44,
+  padding: "0 12px",
   background: "rgba(255,255,255,0.06)",
   border: "1px solid rgba(255,255,255,0.1)",
   borderRadius: 6,
   color: "#ccc",
   cursor: "pointer",
-  fontSize: 12,
+  fontSize: 13,
   fontWeight: 500,
 };
