@@ -54,6 +54,12 @@ export interface StopFeature {
     stopId: string;
     stopName: string;
     routes?: string[];
+    /** Visual prominence for the map: 0 = local stop, 1 = mid-tier (mid
+     *  subway interchange or LIRR branch terminal), 2 = major hub (Times
+     *  Sq, Atlantic, Penn, Jamaica). Replaces the prior `routeCount`-based
+     *  thresholds at the layer level so the rendering can be calibrated
+     *  per mode at the API rather than hard-coded into MapLibre filters. */
+    importance?: 0 | 1 | 2;
   };
   geometry: {
     type: "Point";

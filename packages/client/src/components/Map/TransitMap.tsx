@@ -389,24 +389,28 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
             id="station-dots"
             type="circle"
             paint={{
+              // Dot size + halo scale with the API-emitted `importance`
+              // bucket (0/1/2). Per-mode thresholds live server-side so
+              // subway's "8+ routes = hub" logic doesn't dictate LIRR
+              // (where Jamaica + Penn matter regardless of count).
               "circle-radius": [
                 "interpolate", ["linear"], ["zoom"],
                 11, [
                   "case",
-                  [">=", ["get", "routeCount"], 8], 4,
-                  [">=", ["get", "routeCount"], 4], 2.5,
+                  ["==", ["get", "importance"], 2], 4,
+                  ["==", ["get", "importance"], 1], 2.5,
                   2,
                 ],
                 14, [
                   "case",
-                  [">=", ["get", "routeCount"], 8], 7,
-                  [">=", ["get", "routeCount"], 4], 5,
+                  ["==", ["get", "importance"], 2], 7,
+                  ["==", ["get", "importance"], 1], 5,
                   4,
                 ],
                 16, [
                   "case",
-                  [">=", ["get", "routeCount"], 8], 9,
-                  [">=", ["get", "routeCount"], 4], 7,
+                  ["==", ["get", "importance"], 2], 9,
+                  ["==", ["get", "importance"], 1], 7,
                   6,
                 ],
               ],
@@ -420,14 +424,14 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
                 "interpolate", ["linear"], ["zoom"],
                 11, [
                   "case",
-                  [">=", ["get", "routeCount"], 8], 2,
-                  [">=", ["get", "routeCount"], 4], 1.5,
+                  ["==", ["get", "importance"], 2], 2,
+                  ["==", ["get", "importance"], 1], 1.5,
                   1,
                 ],
                 14, [
                   "case",
-                  [">=", ["get", "routeCount"], 8], 2.5,
-                  [">=", ["get", "routeCount"], 4], 1.8,
+                  ["==", ["get", "importance"], 2], 2.5,
+                  ["==", ["get", "importance"], 1], 1.8,
                   1.2,
                 ],
               ],
@@ -435,7 +439,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
               // bright halo for hubs to make them visually "premium".
               "circle-stroke-color": [
                 "case",
-                [">=", ["get", "routeCount"], 8], "#ffffff",
+                ["==", ["get", "importance"], 2], "#ffffff",
                 "#0a0a1a",
               ],
               "circle-stroke-opacity": 1,
@@ -444,14 +448,16 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
           />
 
           {/* Major-hub labels — shown earlier so the map is readable at
-              default zoom. Filters in only stations with 4+ routes to avoid
-              cluttering Brooklyn / outer borough density. */}
+              default zoom. Filter on importance >= 1: subway suppresses
+              local stops at this zoom (avoids clutter); LIRR shows every
+              station because its network is geographically sparse and 127
+              stations spread over 100+ miles need labels at wider zooms. */}
           <Layer
             id="station-labels-major"
             type="symbol"
             minzoom={12}
             maxzoom={14}
-            filter={[">=", ["get", "routeCount"], 4]}
+            filter={[">=", ["get", "importance"], 1]}
             layout={{
               "text-field": ["get", "stopName"],
               "text-size": [
@@ -464,7 +470,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
               "text-anchor": "top",
               "text-max-width": 8,
               "text-optional": true,
-              "symbol-sort-key": ["-", 0, ["get", "routeCount"]],
+              "symbol-sort-key": ["-", 0, ["get", "importance"]],
             }}
             paint={{
               "text-color": "#d8d8e0",
@@ -479,7 +485,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
           />
 
           {/* Detailed labels — at zoom 14+, every station shows its name plus
-              the routes serving it (PT-203). Sorted by routeCount so hubs win
+              the routes serving it (PT-203). Sorted by importance so hubs win
               collision contests. */}
           <Layer
             id="station-labels-detailed"
@@ -497,7 +503,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
               "text-anchor": "top",
               "text-max-width": 10,
               "text-optional": true,
-              "symbol-sort-key": ["-", 0, ["get", "routeCount"]],
+              "symbol-sort-key": ["-", 0, ["get", "importance"]],
             }}
             paint={{
               "text-color": "#d8d8e0",
