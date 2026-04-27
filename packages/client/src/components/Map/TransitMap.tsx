@@ -99,12 +99,16 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
   // Subway → NYC; LIRR → Long Island. Without this, switching to LIRR leaves
   // the user staring at Manhattan with the network entirely off-screen.
   //
-  // Track which mode we last fit, not whether the effect has fired. The
-  // earlier "fired-once" guard tripped on mount with routeShapes=null, then
-  // ran for real once routes loaded — overriding initialViewState. Using
-  // a mode ref means the initial mode just records itself the first time
-  // its routes arrive (no fit), and only subsequent mode changes trigger a
-  // fit.
+  // Deps are [routeShapes] alone — NOT [mode, routeShapes]. When the user
+  // flips mode, React commits the new mode prop one render before
+  // useRouteShapes can finish its setRouteShapes(null) reset, so for one
+  // render `routeShapes` is the previous mode's data while `mode` is the new
+  // one. With mode in the deps the effect would fire here and fit to the
+  // OLD bbox under the NEW mode name — switching to LIRR would zoom the map
+  // to NYC and vice versa. Excluding mode means the effect only fires when
+  // routeShapes itself actually changes (after the reset, then again when
+  // the new mode's data arrives), and the closure picks up the matching
+  // mode at that moment.
   const lastFitMode = useRef<Mode | null>(null);
   useEffect(() => {
     if (!routeShapes || routeShapes.features.length === 0) return;
@@ -134,7 +138,8 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
       maxZoom: 12,
     });
     lastFitMode.current = mode;
-  }, [mode, routeShapes]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mode intentionally excluded; see comment above
+  }, [routeShapes]);
 
   // Auto-fit the viewport to the planned route so users immediately see the
   // whole trip — fixes the case where one segment goes off-screen (e.g. an
