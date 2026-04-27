@@ -18,8 +18,11 @@ COPY packages/client/ packages/client/
 # Build client static files
 RUN pnpm --filter @panoptrain/client build
 
-# Download static GTFS data
+# Download static GTFS data — subway and LIRR. Baked into the image so the
+# runtime container starts with data on disk; refreshes on every Docker
+# rebuild (Railway rebuilds on git push).
 RUN pnpm download-gtfs
+RUN pnpm download-gtfs:lirr
 
 ENV NODE_ENV=production
 ENV PORT=3001
