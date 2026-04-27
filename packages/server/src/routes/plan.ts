@@ -3,11 +3,13 @@ import type { PlanResponse } from "@panoptrain/shared";
 import { loadStaticGtfs } from "../services/gtfs-loader.js";
 import { buildStationGraph, planTrips, type StationGraph } from "../services/trip-planner.js";
 
+// Trip planner is subway-only for now (PT-508) — LIRR is schedule-based and
+// needs its own graph + planner.
 let cachedGraph: StationGraph | null = null;
 
 function getGraph(): StationGraph {
   if (!cachedGraph) {
-    cachedGraph = buildStationGraph(loadStaticGtfs());
+    cachedGraph = buildStationGraph(loadStaticGtfs("subway"));
   }
   return cachedGraph;
 }
@@ -30,7 +32,7 @@ plan.get("/", (c) => {
     return c.json({ error: "Empty 'from' or 'to' query parameter" }, 400);
   }
 
-  const gtfs = loadStaticGtfs();
+  const gtfs = loadStaticGtfs("subway");
   for (const id of [...fromIds, ...toIds]) {
     if (!gtfs.stops[id]) {
       return c.json({ error: `Unknown stop ID: ${id}` }, 400);

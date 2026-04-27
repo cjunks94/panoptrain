@@ -122,6 +122,21 @@ function getLine(shapeId: string, gtfs: StaticGtfsData): LineData | null {
   return cached;
 }
 
+/** Backfill routeId / directionId from static GTFS when the realtime feed
+ *  doesn't supply them. The LIRR feed leaves trip.routeId empty in the
+ *  protobuf even though the tripId matches a static trip — without this,
+ *  every LIRR train would have routeId="" and fail shape lookup. Exported
+ *  for unit tests. */
+export function enrichWithStatic<T extends { tripId: string; routeId: string; directionId: number }>(
+  entry: T,
+  gtfs: StaticGtfsData,
+): T {
+  if (entry.routeId) return entry;
+  const trip = gtfs.trips[entry.tripId];
+  if (!trip) return entry;
+  return { ...entry, routeId: trip.routeId, directionId: entry.directionId || trip.directionId };
+}
+
 export function interpolatePositions(
   vehicles: ParsedVehicle[],
   tripUpdates: ParsedTripUpdate[],
@@ -129,6 +144,9 @@ export function interpolatePositions(
 ): TrainPosition[] {
   const now = Math.floor(Date.now() / 1000);
   buildLookups(gtfs);
+
+  vehicles = vehicles.map((v) => enrichWithStatic(v, gtfs));
+  tripUpdates = tripUpdates.map((tu) => enrichWithStatic(tu, gtfs));
 
   // Index trip updates by tripId
   const tuByTrip = new Map<string, ParsedTripUpdate>();

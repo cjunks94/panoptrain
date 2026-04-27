@@ -8,10 +8,12 @@ import { useTrainPositions } from "./hooks/useTrainPositions.js";
 import { useTrainFeatures } from "./hooks/useTrainFeatures.js";
 import { useRouteShapes } from "./hooks/useRouteShapes.js";
 import { useLineFilter } from "./hooks/useLineFilter.js";
+import { useMode } from "./hooks/useMode.js";
 
 export default function App() {
-  const { data, isStale, lastUpdated } = useTrainPositions();
-  const { routeShapes, stopsGeoJson } = useRouteShapes();
+  const [mode, setMode] = useMode();
+  const { data, isStale, lastUpdated } = useTrainPositions(mode);
+  const { routeShapes, stopsGeoJson } = useRouteShapes(mode);
   const { visibleRoutes, toggleRoute, toggleGroup, allOn, allOff } = useLineFilter();
   const [panelOpen, setPanelOpen] = useState(true);
   const [planRoute, setPlanRoute] = useState<TripPlan | null>(null);
@@ -27,8 +29,16 @@ export default function App() {
     return ids;
   }, [planRoute]);
 
+  // Route-filter chips only exist for subway (PT-506 will add LIRR groups).
+  // On LIRR, bypass the filter by passing a synthetic "all routes" set so
+  // every train shows.
+  const effectiveVisibleRoutes = useMemo(() => {
+    if (mode === "subway") return visibleRoutes;
+    return new Set((data?.trains ?? []).map((t) => t.routeId));
+  }, [mode, visibleRoutes, data]);
+
   const { geojsonRef, interpolateFrame, trains } = useTrainFeatures(
-    data, visibleRoutes, routeShapes, planRouteIds,
+    data, effectiveVisibleRoutes, routeShapes, planRouteIds,
   );
 
   const togglePanel = useCallback(() => setPanelOpen((p) => !p), []);
@@ -47,6 +57,8 @@ export default function App() {
       <FilterPanel
         open={panelOpen}
         onToggle={togglePanel}
+        mode={mode}
+        onModeChange={setMode}
         visibleRoutes={visibleRoutes}
         onToggleRoute={toggleRoute}
         onToggleGroup={toggleGroup}

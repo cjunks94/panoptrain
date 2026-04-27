@@ -1,34 +1,42 @@
-import { SUBWAY_FEEDS } from "@panoptrain/shared";
+import { feedsForMode } from "@panoptrain/shared";
+import type { Mode, ParsedVehicle, ParsedTripUpdate } from "@panoptrain/shared";
 import { parseFeed } from "./feed-parser.js";
 import { interpolatePositions } from "./position-interpolator.js";
 import { updateCache } from "./cache.js";
 import type { StaticGtfsData } from "./gtfs-loader.js";
-import type { ParsedVehicle, ParsedTripUpdate } from "@panoptrain/shared";
 
-let pollInterval: ReturnType<typeof setInterval> | null = null;
+const intervals: Partial<Record<Mode, ReturnType<typeof setInterval>>> = {};
 
-export function startPolling(gtfs: StaticGtfsData, intervalMs: number): void {
-  console.log(`Starting MTA feed polling every ${intervalMs / 1000}s...`);
+export function startPolling(mode: Mode, gtfs: StaticGtfsData, intervalMs: number): void {
+  stopPolling(mode); // idempotent — replaces any existing interval for this mode
+  console.log(`Starting ${mode} feed polling every ${intervalMs / 1000}s...`);
 
-  // Poll immediately, then on interval
-  pollFeeds(gtfs);
-  pollInterval = setInterval(() => pollFeeds(gtfs), intervalMs);
+  pollFeeds(mode, gtfs);
+  intervals[mode] = setInterval(() => pollFeeds(mode, gtfs), intervalMs);
 }
 
-export function stopPolling(): void {
-  if (pollInterval) {
-    clearInterval(pollInterval);
-    pollInterval = null;
+export function stopPolling(mode?: Mode): void {
+  if (mode) {
+    const i = intervals[mode];
+    if (i) clearInterval(i);
+    delete intervals[mode];
+    return;
+  }
+  // No mode → stop all
+  for (const k of Object.keys(intervals) as Mode[]) {
+    const i = intervals[k];
+    if (i) clearInterval(i);
+    delete intervals[k];
   }
 }
 
-async function pollFeeds(gtfs: StaticGtfsData): Promise<void> {
+async function pollFeeds(mode: Mode, gtfs: StaticGtfsData): Promise<void> {
   const startTime = Date.now();
+  const feeds = feedsForMode(mode);
 
   try {
-    // Fetch all feeds in parallel
     const results = await Promise.allSettled(
-      SUBWAY_FEEDS.map(async (feed) => {
+      feeds.map(async (feed) => {
         const res = await fetch(feed.url);
         if (!res.ok) {
           throw new Error(`Feed ${feed.id}: HTTP ${res.status}`);
@@ -38,7 +46,6 @@ async function pollFeeds(gtfs: StaticGtfsData): Promise<void> {
       }),
     );
 
-    // Merge all successful feed results
     const allVehicles: ParsedVehicle[] = [];
     const allTripUpdates: ParsedTripUpdate[] = [];
     let successCount = 0;
@@ -51,21 +58,21 @@ async function pollFeeds(gtfs: StaticGtfsData): Promise<void> {
         allTripUpdates.push(...result.value.tripUpdates);
       } else {
         failCount++;
-        console.warn(`Feed error: ${result.reason}`);
+        console.warn(`${mode} feed error: ${result.reason}`);
       }
     }
 
-    // Interpolate positions
     const trains = interpolatePositions(allVehicles, allTripUpdates, gtfs);
-    updateCache(trains);
+    updateCache(mode, trains);
 
     const elapsed = Date.now() - startTime;
+    const failSuffix = failCount > 0 ? `, ${failCount} failed` : "";
     console.log(
-      `Poll complete in ${elapsed}ms: ${successCount}/${SUBWAY_FEEDS.length} feeds ok, ` +
+      `Poll ${mode} in ${elapsed}ms: ${successCount}/${feeds.length} feeds ok${failSuffix}, ` +
         `${allVehicles.length} vehicles, ${allTripUpdates.length} trip updates, ` +
         `${trains.length} positioned trains`,
     );
   } catch (err) {
-    console.error("Poll failed:", err);
+    console.error(`${mode} poll failed:`, err);
   }
 }

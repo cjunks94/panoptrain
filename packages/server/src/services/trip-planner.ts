@@ -463,7 +463,7 @@ function extractShapePath(
  * "3 trains, on time" rather than "no data".
  */
 function enrichWithDelays(segments: Array<RideSegment | TransferSegment>): void {
-  const snapshot = getCurrentSnapshot();
+  const snapshot = getCurrentSnapshot("subway");
   if (!snapshot) return;
 
   const trainsByRoute = new Map<string, TrainPosition[]>();

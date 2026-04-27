@@ -7,8 +7,8 @@ import { join, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadStaticGtfs } from "./services/gtfs-loader.js";
 import { startPolling } from "./services/mta-poller.js";
-import trains from "./routes/trains.js";
-import staticRoutes from "./routes/static.js";
+import { createTrainsRouter } from "./routes/trains.js";
+import { createStaticRouter } from "./routes/static.js";
 import plan from "./routes/plan.js";
 
 // Load env
@@ -32,10 +32,23 @@ app.use("/api/*", compress());
 // Health check
 app.get("/api/health", (c) => c.json({ status: "ok", uptime: process.uptime() }));
 
-// API routes
-app.route("/api/trains", trains);
+// Per-mode API routes (PT-503). Subway also exposed at the legacy /api/trains
+// and /api (routes/stops) paths so existing clients keep working during the
+// transition to mode-aware endpoints.
+const subwayTrains = createTrainsRouter("subway");
+const lirrTrains = createTrainsRouter("lirr");
+const subwayStatic = createStaticRouter("subway");
+const lirrStatic = createStaticRouter("lirr");
+
+app.route("/api/subway/trains", subwayTrains);
+app.route("/api/lirr/trains", lirrTrains);
+app.route("/api/subway", subwayStatic);
+app.route("/api/lirr", lirrStatic);
+
+// Legacy aliases — subway-only. Trip planner is subway-only by design (PT-508).
+app.route("/api/trains", subwayTrains);
 app.route("/api/plan", plan);
-app.route("/api", staticRoutes);
+app.route("/api", subwayStatic);
 
 // In production, serve the built client files
 const clientDist = join(fileURLToPath(import.meta.url), "../../../client/dist");
@@ -68,13 +81,21 @@ if (existsSync(join(clientDist, "index.html"))) {
   console.log("Serving client from", clientDist);
 }
 
-// Load static GTFS data and start polling
+// Load static GTFS data and start polling — subway is required, LIRR is
+// optional (logs a warning and skips if data isn't downloaded yet).
 try {
-  const gtfs = loadStaticGtfs();
-  startPolling(gtfs, POLL_INTERVAL);
+  const subwayGtfs = loadStaticGtfs("subway");
+  startPolling("subway", subwayGtfs, POLL_INTERVAL);
 } catch (err) {
-  console.error("Failed to load static GTFS data:", err);
+  console.error("Failed to load subway GTFS data:", err);
   console.error('Run "pnpm download-gtfs" to download and process the data first.');
+}
+
+try {
+  const lirrGtfs = loadStaticGtfs("lirr");
+  startPolling("lirr", lirrGtfs, POLL_INTERVAL);
+} catch (err) {
+  console.warn("LIRR GTFS data not available — skipping. Run \"pnpm download-gtfs lirr\" to enable LIRR.");
 }
 
 console.log(`Panoptrain server starting on port ${PORT}...`);
