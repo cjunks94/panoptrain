@@ -1,28 +1,10 @@
-import { useEffect, useState } from "react";
 import { routeGroupsForMode } from "@panoptrain/shared";
 import type { Mode, StopsGeoJSON, TripPlan, TrainPosition } from "@panoptrain/shared";
 import { LineToggle } from "./LineToggle.js";
 import { TripPlanner } from "./TripPlanner.js";
 import { ModeTabs } from "./ModeTabs.js";
 import { StatusBadge } from "../Layout/StatusBadge.js";
-
-const MOBILE_QUERY = "(max-width: 767px)";
-
-/** Reactive viewport check — flips if the user rotates a tablet or resizes
- *  desktop down to mobile widths. SSR-safe: returns false until mount. */
-function useIsMobile(): boolean {
-  const [isMobile, setIsMobile] = useState(() =>
-    typeof window !== "undefined" && window.matchMedia(MOBILE_QUERY).matches,
-  );
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const mq = window.matchMedia(MOBILE_QUERY);
-    const update = () => setIsMobile(mq.matches);
-    mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
-  }, []);
-  return isMobile;
-}
+import { useIsMobile } from "../../hooks/useIsMobile.js";
 
 interface FilterPanelProps {
   open: boolean;

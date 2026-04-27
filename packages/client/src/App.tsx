@@ -46,6 +46,7 @@ export default function App() {
         planRoute={planRoute}
         planRouteIds={planRouteIds}
         mode={mode}
+        panelOpen={panelOpen}
       />
       <FilterPanel
         open={panelOpen}

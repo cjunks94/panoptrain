@@ -4,6 +4,9 @@ import type { MapLayerMouseEvent, MapRef } from "react-map-gl/maplibre";
 import type { Mode, RoutesGeoJSON, StopsGeoJSON, TripPlan } from "@panoptrain/shared";
 import { ROUTE_INFO } from "@panoptrain/shared";
 import type { TrainInfo } from "../../hooks/useTrainFeatures.js";
+import { useIsMobile } from "../../hooks/useIsMobile.js";
+import { useViewportHeight } from "../../hooks/useViewportHeight.js";
+import { computeFitPadding } from "../../lib/mapPadding.js";
 import type { GeoJSON } from "geojson";
 
 const BASEMAP = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
@@ -51,6 +54,10 @@ interface TransitMapProps {
   /** Active transit mode. Drives auto-fit on mode switch and per-mode line
    *  styling. */
   mode: Mode;
+  /** Whether the filter panel is open. Auto-fit padding compensates for
+   *  the visible panel: 320px on the left when open on desktop, 75vh
+   *  bottom sheet on mobile. */
+  panelOpen: boolean;
 }
 
 interface PopupInfo {
@@ -59,10 +66,26 @@ interface PopupInfo {
   lat: number;
 }
 
-export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, stops, planRoute, planRouteIds, mode }: TransitMapProps) {
+export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, stops, planRoute, planRouteIds, mode, panelOpen }: TransitMapProps) {
   const [popup, setPopup] = useState<PopupInfo | null>(null);
   const [iconsReady, setIconsReady] = useState(false);
   const mapRef = useRef<MapRef>(null);
+  const isMobile = useIsMobile();
+  const viewportHeight = useViewportHeight();
+
+  // fitBounds padding compensates for whichever piece of UI covers the map.
+  // The mobile bottom-sheet padding is computed from the live viewport
+  // height so it scales correctly across iPhone SE (667h) → Pro Max (932h);
+  // a fixed value would under-pad tall phones and hide the southern part
+  // of the network behind the sheet.
+  //
+  // Read by closure inside the auto-fit useEffects — the eslint-disable
+  // comments there are intentional. Toggle-driven re-fit is undesirable;
+  // the next data change picks up the latest memoized padding.
+  const fitPadding = useMemo(
+    () => computeFitPadding({ isMobile, panelOpen, viewportHeight }),
+    [isMobile, panelOpen, viewportHeight],
+  );
 
   // RAF loop — interpolates coordinates and pushes directly to MapLibre (no React renders)
   useEffect(() => {
@@ -94,6 +117,20 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     map.addImage("marker-square", createSquareIcon(size), { sdf: true });
     setIconsReady(true);
   }, []);
+
+  // Keep train layers on top of everything else. The trains <Source> is
+  // unconditional and mounts at t=0, but routes/stops/plan-* sources are
+  // conditional and mount later once their data arrives — MapLibre adds new
+  // layers above existing ones, so without this re-promotion the route
+  // lines, stations, and plan halos would render OVER the train markers
+  // until the user reloaded the page.
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    if (!map) return;
+    for (const id of ["train-glow", "train-rim", "train-markers", "train-carets"]) {
+      if (map.getLayer(id)) map.moveLayer(id);
+    }
+  }, [routeShapes, stops, planRoute, iconsReady]);
 
   // Auto-fit the viewport to the active mode's network on mode switch (PT-507).
   // Subway → NYC; LIRR → Long Island. Without this, switching to LIRR leaves
@@ -133,18 +170,19 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     }
     if (minLon === Infinity) return;
     map.fitBounds([[minLon, minLat], [maxLon, maxLat]], {
-      padding: { top: 60, bottom: 60, left: 320, right: 60 },
+      padding: fitPadding,
       duration: 800,
       maxZoom: 12,
     });
     lastFitMode.current = mode;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mode intentionally excluded; see comment above
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mode + fitPadding intentionally excluded; only routeShapes drives fit
   }, [routeShapes]);
 
   // Auto-fit the viewport to the planned route so users immediately see the
   // whole trip — fixes the case where one segment goes off-screen (e.g. an
   // L-line ride heading east into Brooklyn while the user is zoomed on
-  // Manhattan). Padded for the left filter panel.
+  // Manhattan). Padding compensates for the filter panel — see fitPadding
+  // above.
   useEffect(() => {
     if (!planRoute) return;
     const map = mapRef.current?.getMap();
@@ -161,10 +199,11 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     }
     if (minLon === Infinity) return;
     map.fitBounds([[minLon, minLat], [maxLon, maxLat]], {
-      padding: { top: 80, bottom: 80, left: 320, right: 80 },
+      padding: fitPadding,
       duration: 800,
       maxZoom: 14,
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only planRoute drives this fit; fitPadding read at fit time
   }, [planRoute]);
 
   // Pulse the plan-route-outline AND the plan-stop halos in lockstep when a
