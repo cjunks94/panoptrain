@@ -557,9 +557,11 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
         </Source>
       )}
 
-      {/* Train markers — data pushed by RAF loop via source.setData() */}
+      {/* Train markers — data pushed by RAF loop via source.setData(). The
+          source is declared last so its layers render on top of routes,
+          stops, and plan highlights. */}
       <Source id="trains" type="geojson" data={geojsonRef.current}>
-        {/* Glow layer (underneath) */}
+        {/* Soft outer glow */}
         <Layer
           id="train-glow"
           type="circle"
@@ -570,6 +572,38 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
             "circle-blur": 1,
           }}
         />
+        {/* Dark rim — same SDF icons as the marker but slightly larger and
+            dark-tinted, drawn underneath. The 0.55-vs-0.50 size delta shows
+            as a 1-2px dark ring around the colored bullet so trains stand
+            out against same-colored route lines beneath them. We use a
+            symbol layer (not circle) because circle-translate doesn't
+            support data-driven expressions, so cluster fan-out can only be
+            mirrored via icon-offset.
+            icon-offset is multiplied by icon-size for the final screen
+            offset, so the rim's offset values are scaled down to match the
+            marker's screen position: 78px / 0.55 ≈ 142. */}
+        {iconsReady && (
+          <Layer
+            id="train-rim"
+            type="symbol"
+            layout={{
+              "icon-image": ["case", ["get", "isExpress"], "marker-square", "marker-circle"],
+              "icon-size": 0.55,
+              "icon-allow-overlap": true,
+              "icon-ignore-placement": true,
+              "icon-offset": [
+                "interpolate", ["linear"], ["get", "clusterOffset"],
+                -3, ["literal", [-142, 0]],
+                0, ["literal", [0, 0]],
+                3, ["literal", [142, 0]],
+              ] as any,
+            }}
+            paint={{
+              "icon-color": "#0a0a1a",
+              "icon-opacity": ["*", 0.95, ["get", "opacity"]],
+            }}
+          />
+        )}
         {/* Route bullet — colored circle (local) or square (express) with route letter */}
         {iconsReady && (
           <Layer
@@ -603,6 +637,10 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
               "icon-opacity": ["get", "opacity"],
               "text-color": ["get", "textColor"],
               "text-opacity": ["get", "opacity"],
+              // Halo around the route number so it stays readable even if
+              // the icon is rendered against a same-color route line.
+              "text-halo-color": "#0a0a1a",
+              "text-halo-width": 1,
             }}
           />
         )}

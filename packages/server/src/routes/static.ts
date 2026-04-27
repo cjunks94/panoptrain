@@ -16,17 +16,28 @@ export function createStaticRouter(mode: Mode): Hono {
     if (!routesGeoJson) {
       const gtfs = loadStaticGtfs(mode);
 
-      // Group shapes by route — pick one representative shape per route+direction
-      const seenRouteDir = new Set<string>();
-      const features: RouteFeature[] = [];
-
+      // For each route+direction, pick the LONGEST shape (most coordinates)
+      // as the representative. The naive "first trip wins" approach silently
+      // drops track when a route has multiple service patterns sharing a
+      // common segment — e.g. LIRR Port Jefferson Branch has 23 shape
+      // variants; the most-frequent is Penn→Huntington (electric service)
+      // while a smaller fraction of trips extend Huntington→Port Jefferson
+      // (diesel). Picking by max coordinates gives full geographic extent
+      // because longer service patterns are supersets of shorter ones.
+      const longestPerRouteDir = new Map<string, { trip: typeof gtfs.trips[string]; coordCount: number }>();
       for (const trip of Object.values(gtfs.trips)) {
-        const key = `${trip.routeId}-${trip.directionId}`;
-        if (seenRouteDir.has(key)) continue;
-        seenRouteDir.add(key);
-
         const shape = gtfs.shapes[trip.shapeId];
         if (!shape || shape.coordinates.length < 2) continue;
+        const key = `${trip.routeId}-${trip.directionId}`;
+        const current = longestPerRouteDir.get(key);
+        if (!current || shape.coordinates.length > current.coordCount) {
+          longestPerRouteDir.set(key, { trip, coordCount: shape.coordinates.length });
+        }
+      }
+
+      const features: RouteFeature[] = [];
+      for (const { trip } of longestPerRouteDir.values()) {
+        const shape = gtfs.shapes[trip.shapeId]!;
 
         // Prefer the per-mode static GTFS data (correct colors for both subway
         // and LIRR). Fall back to ROUTE_INFO for any subway lines whose GTFS
