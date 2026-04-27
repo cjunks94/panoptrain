@@ -391,7 +391,11 @@ const inputStyle: React.CSSProperties = {
   border: "1px solid rgba(255,255,255,0.1)",
   borderRadius: 6,
   color: "#e0e0e0",
-  fontSize: 14,
+  // 16px specifically to defeat iOS Safari's auto-zoom-on-focus behavior —
+  // it kicks in for any input with computed font-size < 16. A smaller font
+  // would fit better visually but trap users in a zoomed-in viewport until
+  // they manually pinch out, which is worse UX than a slightly larger input.
+  fontSize: 16,
   fontFamily: "inherit",
   boxSizing: "border-box",
 };

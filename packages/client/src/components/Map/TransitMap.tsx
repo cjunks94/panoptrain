@@ -5,6 +5,8 @@ import type { Mode, RoutesGeoJSON, StopsGeoJSON, TripPlan } from "@panoptrain/sh
 import { ROUTE_INFO } from "@panoptrain/shared";
 import type { TrainInfo } from "../../hooks/useTrainFeatures.js";
 import { useIsMobile } from "../../hooks/useIsMobile.js";
+import { useViewportHeight } from "../../hooks/useViewportHeight.js";
+import { computeFitPadding } from "../../lib/mapPadding.js";
 import type { GeoJSON } from "geojson";
 
 const BASEMAP = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
@@ -69,24 +71,21 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
   const [iconsReady, setIconsReady] = useState(false);
   const mapRef = useRef<MapRef>(null);
   const isMobile = useIsMobile();
+  const viewportHeight = useViewportHeight();
 
-  // fitBounds padding compensates for whichever piece of UI is currently
-  // covering the map. On desktop with panel open, that's 320px on the left.
-  // On mobile, the panel is a bottom sheet at ~75vh — so when open we pad
-  // the bottom heavily and zero out the left. Hardcoding 320px on the left
-  // for all viewports leaves ~70px of usable map width on a 390px iPhone,
-  // which the auto-fit then crams the whole network into.
-  const fitPadding = useMemo(() => {
-    if (!panelOpen) return { top: 60, bottom: 60, left: 60, right: 60 };
-    if (isMobile) {
-      // 75vh sheet plus a little extra so the fitted bbox doesn't touch the
-      // sheet's top edge. Math: sheet eats 75% of viewport-height; the map
-      // area above is ~25vh. Use a conservative ~520px estimate that works
-      // across phone sizes (380-430px wide × 700-900px tall).
-      return { top: 60, bottom: 520, left: 30, right: 30 };
-    }
-    return { top: 60, bottom: 60, left: 320, right: 60 };
-  }, [isMobile, panelOpen]);
+  // fitBounds padding compensates for whichever piece of UI covers the map.
+  // The mobile bottom-sheet padding is computed from the live viewport
+  // height so it scales correctly across iPhone SE (667h) → Pro Max (932h);
+  // a fixed value would under-pad tall phones and hide the southern part
+  // of the network behind the sheet.
+  //
+  // Read by closure inside the auto-fit useEffects — the eslint-disable
+  // comments there are intentional. Toggle-driven re-fit is undesirable;
+  // the next data change picks up the latest memoized padding.
+  const fitPadding = useMemo(
+    () => computeFitPadding({ isMobile, panelOpen, viewportHeight }),
+    [isMobile, panelOpen, viewportHeight],
+  );
 
   // RAF loop — interpolates coordinates and pushes directly to MapLibre (no React renders)
   useEffect(() => {
