@@ -48,3 +48,24 @@ export function popupOffsetPx(motion: ScreenVec, distancePx: number): ScreenVec 
   const dir = popupOffsetDirection(motion);
   return { x: dir.x * distancePx + 0, y: dir.y * distancePx + 0 };
 }
+
+/** Extract a user-facing train number from a GTFS tripId. The tripId
+ *  formats vary by mode:
+ *    LIRR   → "GO104_26_705"           → 705 (rider-visible train number)
+ *    Subway → "AFA25...00_006600_..."  → 006600 (trip-start time slot)
+ *
+ *  We pick the LAST run of 3+ consecutive digits because:
+ *    - In LIRR IDs the train number is the trailing segment, and there's
+ *      usually a smaller 2-3 digit "schedule version" earlier (e.g. 104)
+ *      that we want to ignore.
+ *    - In subway IDs the only 3+ digit run is the time slot, and rider-
+ *      visible train numbers don't really exist anyway — power users
+ *      just want any unique handle.
+ *
+ *  Returns null when no match is found rather than the raw tripId so
+ *  callers can decide whether to render the row at all. */
+export function trainNumber(tripId: string): string | null {
+  const matches = tripId.match(/\d{3,}/g);
+  if (!matches || matches.length === 0) return null;
+  return matches[matches.length - 1];
+}

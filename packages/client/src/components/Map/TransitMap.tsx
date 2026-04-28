@@ -139,7 +139,7 @@ interface TransitMapProps {
  *  far enough that it doesn't visually merge with the marker but close
  *  enough that the relationship reads as "this popup is about that train".
  *  The pointer/tail extends from the popup edge toward the train. */
-const POPUP_OFFSET_PX = 80;
+const POPUP_OFFSET_PX = 120;
 /** How many degrees of bearing in lng/lat to project the "ahead" point used
  *  for screen-space motion direction. Small enough to be near the train
  *  position so map curvature doesn't matter. */

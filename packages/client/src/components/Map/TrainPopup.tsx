@@ -1,5 +1,6 @@
 import { forwardRef } from "react";
 import type { TrainInfo } from "../../hooks/useTrainFeatures.js";
+import { trainNumber } from "../../lib/popupPlacement.js";
 
 interface TrainPopupProps {
   train: TrainInfo;
@@ -21,6 +22,7 @@ interface TrainPopupProps {
  *  train's path or directly behind it. */
 export const TrainPopup = forwardRef<HTMLDivElement, TrainPopupProps>(
   function TrainPopup({ train, following, onClose, onToggleFollow }, ref) {
+    const trainNo = trainNumber(train.tripId);
     return (
       <div
         ref={ref}
@@ -67,6 +69,19 @@ export const TrainPopup = forwardRef<HTMLDivElement, TrainPopupProps>(
             {train.label}
           </span>
           <strong style={{ flex: 1, color: "#fff" }}>{train.destination}</strong>
+          {trainNo && (
+            <span
+              style={{
+                color: "#888",
+                fontSize: 11,
+                fontFamily: "monospace",
+                fontVariantNumeric: "tabular-nums",
+                whiteSpace: "nowrap",
+              }}
+            >
+              #{trainNo}
+            </span>
+          )}
           <button
             onClick={onClose}
             aria-label="Close"

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { popupOffsetDirection, popupOffsetPx } from "../popupPlacement.js";
+import { popupOffsetDirection, popupOffsetPx, trainNumber } from "../popupPlacement.js";
 
 /**
  * The popup follows the train but sits perpendicular to its motion so it
@@ -62,5 +62,35 @@ describe("popupOffsetPx", () => {
   it("preserves the perpendicular geometry at any pixel scale", () => {
     const ne = popupOffsetPx({ x: 1, y: -1 }, 100);
     expect(Math.hypot(ne.x, ne.y)).toBeCloseTo(100);
+  });
+});
+
+describe("trainNumber", () => {
+  it("extracts the trailing train number from an LIRR tripId", () => {
+    expect(trainNumber("GO104_26_705")).toBe("705");
+    expect(trainNumber("GO104_26_1066")).toBe("1066");
+  });
+
+  it("extracts the time-slot from a subway tripId", () => {
+    expect(trainNumber("AFA25GEN-1038-Sunday-00_006600_1..S03R")).toBe("006600");
+    expect(trainNumber("AFA25GEN-1038-Sunday-00_011200_1..N03R")).toBe("011200");
+  });
+
+  it("ignores 1-2 digit segments and prefers a longer run", () => {
+    // GO104_26_2 — only "104" is 3+ digits; "26" and "2" are too short.
+    expect(trainNumber("GO104_26_2")).toBe("104");
+  });
+
+  it("picks the LAST 3+ digit run when multiple exist", () => {
+    // LIRR "GO104_26_705" has both "104" and "705"; we want the trailing one.
+    const matches = "GO104_26_705".match(/\d{3,}/g);
+    expect(matches).toEqual(["104", "705"]);
+    expect(trainNumber("GO104_26_705")).toBe("705");
+  });
+
+  it("returns null for tripIds with no 3+ digit run", () => {
+    expect(trainNumber("AB_12_X")).toBeNull();
+    expect(trainNumber("")).toBeNull();
+    expect(trainNumber("no-digits-at-all")).toBeNull();
   });
 });
