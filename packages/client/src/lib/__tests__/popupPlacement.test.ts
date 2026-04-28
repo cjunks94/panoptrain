@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { popupOffsetDirection, popupOffsetPx, trainNumber } from "../popupPlacement.js";
+import { popupOffsetDirection, popupOffsetPx, trainNumber, bearingToCardinal } from "../popupPlacement.js";
 
 /**
  * The popup follows the train but sits perpendicular to its motion so it
@@ -92,5 +92,43 @@ describe("trainNumber", () => {
     expect(trainNumber("AB_12_X")).toBeNull();
     expect(trainNumber("")).toBeNull();
     expect(trainNumber("no-digits-at-all")).toBeNull();
+  });
+});
+
+describe("bearingToCardinal", () => {
+  it("snaps cardinal directions to their sector", () => {
+    expect(bearingToCardinal(0)).toBe("N");
+    expect(bearingToCardinal(90)).toBe("E");
+    expect(bearingToCardinal(180)).toBe("S");
+    expect(bearingToCardinal(270)).toBe("W");
+  });
+
+  it("snaps inter-cardinal directions to their sector", () => {
+    expect(bearingToCardinal(45)).toBe("NE");
+    expect(bearingToCardinal(135)).toBe("SE");
+    expect(bearingToCardinal(225)).toBe("SW");
+    expect(bearingToCardinal(315)).toBe("NW");
+  });
+
+  it("rounds to the nearest sector at boundaries", () => {
+    // Just under sector boundary should round down.
+    expect(bearingToCardinal(22)).toBe("N");
+    expect(bearingToCardinal(23)).toBe("NE");
+    expect(bearingToCardinal(67)).toBe("NE");
+    expect(bearingToCardinal(68)).toBe("E");
+  });
+
+  it("normalizes negative and >360 bearings", () => {
+    expect(bearingToCardinal(-90)).toBe("W");   // -90 → 270
+    expect(bearingToCardinal(360)).toBe("N");   // 360 → 0
+    expect(bearingToCardinal(720)).toBe("N");   // 720 → 0
+    expect(bearingToCardinal(450)).toBe("E");   // 450 → 90
+  });
+
+  it("returns null for null, NaN, or Infinity bearing", () => {
+    expect(bearingToCardinal(null)).toBeNull();
+    expect(bearingToCardinal(NaN)).toBeNull();
+    expect(bearingToCardinal(Infinity)).toBeNull();
+    expect(bearingToCardinal(-Infinity)).toBeNull();
   });
 });

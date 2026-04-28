@@ -69,3 +69,23 @@ export function trainNumber(tripId: string): string | null {
   if (!matches || matches.length === 0) return null;
   return matches[matches.length - 1];
 }
+
+/** Convert a bearing in degrees (0=N, 90=E, 180=S, 270=W) to one of the
+ *  8 compass directions. Snaps to the nearest 45° sector. Returns null
+ *  for invalid inputs (null bearing, NaN) so callers can hide the
+ *  direction indicator when we don't have heading data — happens for
+ *  trains at terminal stops or when the protobuf omits bearing.
+ *
+ *  Sectors are inclusive on the lower bound: a bearing of exactly 22.5°
+ *  rounds to NE, 67.5° rounds to E, etc. */
+export type Cardinal = "N" | "NE" | "E" | "SE" | "S" | "SW" | "W" | "NW";
+
+export function bearingToCardinal(deg: number | null): Cardinal | null {
+  if (deg === null || !Number.isFinite(deg)) return null;
+  // Normalize negative or >360 inputs into [0, 360).
+  const normalized = ((deg % 360) + 360) % 360;
+  const sectors: Cardinal[] = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+  // Each sector spans 45°; offset by half a sector so 0° → N (not split
+  // between N and NW). Math.floor((deg + 22.5) / 45) % 8 gives the index.
+  return sectors[Math.floor((normalized + 22.5) / 45) % 8];
+}

@@ -1,6 +1,24 @@
 import { forwardRef } from "react";
 import type { TrainInfo } from "../../hooks/useTrainFeatures.js";
-import { trainNumber } from "../../lib/popupPlacement.js";
+import { trainNumber, bearingToCardinal } from "../../lib/popupPlacement.js";
+
+/** Tiny upward-pointing triangle. Rotated by `bearing` degrees via inline
+ *  style so the arrow always points in the train's actual direction of
+ *  travel. CSS rotation with 0deg = pointing up matches our bearing
+ *  convention (0° = north). */
+function HeadingArrow({ bearing }: { bearing: number }) {
+  return (
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 10 10"
+      style={{ transform: `rotate(${bearing}deg)`, flexShrink: 0 }}
+      aria-hidden="true"
+    >
+      <polygon points="5,0 9,9 5,7 1,9" fill="currentColor" />
+    </svg>
+  );
+}
 
 interface TrainPopupProps {
   train: TrainInfo;
@@ -23,6 +41,7 @@ interface TrainPopupProps {
 export const TrainPopup = forwardRef<HTMLDivElement, TrainPopupProps>(
   function TrainPopup({ train, following, onClose, onToggleFollow }, ref) {
     const trainNo = trainNumber(train.tripId);
+    const cardinal = bearingToCardinal(train.bearing);
     return (
       <div
         ref={ref}
@@ -95,15 +114,34 @@ export const TrainPopup = forwardRef<HTMLDivElement, TrainPopupProps>(
           </button>
         </div>
 
-        {/* Status line + train number tag share a row so neither crowds the
-            destination header. Train number is right-aligned and dimmed so
-            it reads as a secondary identifier, not competing with status. */}
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+        {/* Status line + heading + train number share a row so the popup
+            stays compact. Heading and train# are dimmed secondary metadata.
+            Heading is hidden when bearing is unavailable (typical at
+            terminals where the protobuf omits it). */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ flex: 1 }}>
             {train.status === "STOPPED_AT"
               ? `At ${train.currentStopName}`
               : `En route to ${train.currentStopName}`}
           </span>
+          {cardinal && train.bearing !== null && (
+            <span
+              aria-label={`heading ${cardinal}`}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 3,
+                color: "#aaa",
+                fontSize: 11,
+                fontWeight: 600,
+                whiteSpace: "nowrap",
+                flexShrink: 0,
+              }}
+            >
+              <HeadingArrow bearing={train.bearing} />
+              {cardinal}
+            </span>
+          )}
           {trainNo && (
             <span
               style={{
