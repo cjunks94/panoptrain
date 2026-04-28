@@ -249,6 +249,31 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     };
   }, [followTripId]);
 
+  // Reposition the popup when the map view changes (zoom, pan, rotate, or
+  // resize). Without this the popup detaches from the train during user
+  // interaction: the train marker moves with the map (MapLibre handles
+  // that), but our popup's screen coordinates are only updated inside the
+  // RAF loop's `if (interpolateFrame())` guard — which returns false during
+  // the idle gap between polls. So a user dragging the map between polls
+  // would see the popup float over wrong territory until the next snapshot.
+  // `move` fires on every viewport change including programmatic ones, and
+  // is cheap to handle since we only do work when a popup is open.
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    if (!map) return;
+    const reposition = () => {
+      const popupId = popupTripIdRef.current;
+      if (!popupId || !popupOverlayRef.current) return;
+      const f = findFeatureById(geojsonRef.current.features, popupId);
+      if (f) positionPopupOverlay(popupOverlayRef.current, map, f);
+      else popupOverlayRef.current.style.display = "none";
+    };
+    map.on("move", reposition);
+    return () => {
+      map.off("move", reposition);
+    };
+  }, [geojsonRef]);
+
   // If the followed train falls out of the snapshot (5min stale eviction,
   // route filter, mode switch), clear follow so the camera doesn't lock to
   // the last known position forever.

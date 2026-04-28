@@ -69,25 +69,17 @@ export const TrainPopup = forwardRef<HTMLDivElement, TrainPopupProps>(
             {train.label}
           </span>
           <strong style={{ flex: 1, color: "#fff" }}>{train.destination}</strong>
-          {trainNo && (
-            <span
-              style={{
-                color: "#888",
-                fontSize: 11,
-                fontFamily: "monospace",
-                fontVariantNumeric: "tabular-nums",
-                whiteSpace: "nowrap",
-              }}
-            >
-              #{trainNo}
-            </span>
-          )}
+          {/* 44×44 hit area meets the project's mobile touch-target standard
+              even though the × glyph itself stays visually compact. Negative
+              margin pulls the button into the popup's padding so the popup
+              doesn't visually grow to accommodate the larger button. */}
           <button
             onClick={onClose}
             aria-label="Close"
             style={{
-              minWidth: 28,
-              minHeight: 28,
+              minWidth: 44,
+              minHeight: 44,
+              margin: "-10px -12px -10px 0",
               padding: 0,
               border: "none",
               background: "transparent",
@@ -96,16 +88,36 @@ export const TrainPopup = forwardRef<HTMLDivElement, TrainPopupProps>(
               lineHeight: 1,
               cursor: "pointer",
               fontFamily: "inherit",
+              flexShrink: 0,
             }}
           >
             ×
           </button>
         </div>
 
-        <div>
-          {train.status === "STOPPED_AT"
-            ? `At ${train.currentStopName}`
-            : `En route to ${train.currentStopName}`}
+        {/* Status line + train number tag share a row so neither crowds the
+            destination header. Train number is right-aligned and dimmed so
+            it reads as a secondary identifier, not competing with status. */}
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <span style={{ flex: 1 }}>
+            {train.status === "STOPPED_AT"
+              ? `At ${train.currentStopName}`
+              : `En route to ${train.currentStopName}`}
+          </span>
+          {trainNo && (
+            <span
+              style={{
+                color: "#888",
+                fontSize: 11,
+                fontFamily: "monospace",
+                fontVariantNumeric: "tabular-nums",
+                whiteSpace: "nowrap",
+                flexShrink: 0,
+              }}
+            >
+              #{trainNo}
+            </span>
+          )}
         </div>
 
         {train.delay !== null && train.delay !== 0 && (
