@@ -21,6 +21,15 @@ export interface TrainsResponse {
   timestamp: number;
   count: number;
   trains: TrainPosition[];
+  /** The poll snapshot prior to the current one (~one POLL_INTERVAL earlier).
+   *  Lets the client bootstrap interpolation immediately on the first poll —
+   *  without it, trains sit motionless until the second poll arrives 30s
+   *  later because the client has nothing to interpolate FROM. Absent if
+   *  the server has only ever taken one snapshot since startup. */
+  previous?: {
+    timestamp: number;
+    trains: TrainPosition[];
+  };
 }
 
 /** Response from GET /api/routes — GeoJSON */
