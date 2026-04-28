@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
-import Map, { Source, Layer, Popup } from "react-map-gl/maplibre";
+import Map, { Source, Layer } from "react-map-gl/maplibre";
 import type { MapLayerMouseEvent, MapRef } from "react-map-gl/maplibre";
 import type { Mode, RoutesGeoJSON, StopsGeoJSON, TripPlan } from "@panoptrain/shared";
 import { ROUTE_INFO } from "@panoptrain/shared";
@@ -7,6 +7,8 @@ import type { TrainInfo } from "../../hooks/useTrainFeatures.js";
 import { useIsMobile } from "../../hooks/useIsMobile.js";
 import { useViewportHeight } from "../../hooks/useViewportHeight.js";
 import { computeFitPadding } from "../../lib/mapPadding.js";
+import { popupOffsetPx } from "../../lib/popupPlacement.js";
+import { TrainPopup } from "./TrainPopup.js";
 import type { GeoJSON } from "geojson";
 
 const BASEMAP = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
@@ -47,6 +49,71 @@ function createSquareIcon(size: number): ImageData {
   return ctx.getImageData(0, 0, size, size);
 }
 
+interface FeatureSnapshot {
+  pos: [number, number];
+  /** Geographic bearing in degrees (0=N, 90=E, 180=S, 270=W). Stored on
+   *  every train feature by useTrainFeatures. */
+  bearing: number;
+}
+
+/** Pick a feature out of the train GeoJSON by tripId. Returns its current
+ *  animated position and bearing, or null if missing / non-Point. */
+function findFeatureById(
+  features: GeoJSON.Feature[],
+  tripId: string,
+): FeatureSnapshot | null {
+  const f = features.find((feat) => feat.properties?.tripId === tripId);
+  if (!f || f.geometry.type !== "Point") return null;
+  const c = f.geometry.coordinates;
+  const bearing = typeof f.properties?.bearing === "number" ? f.properties.bearing : 0;
+  return { pos: [c[0], c[1]], bearing };
+}
+
+/** Position the popup overlay div directly via DOM (no React render). Each
+ *  RAF frame:
+ *   1. projects the train's lng/lat to screen pixels
+ *   2. projects a point slightly ahead of the train along its bearing — the
+ *      screen-space delta gives motion direction, automatically correct for
+ *      map zoom and rotation
+ *   3. computes perpendicular offset via popupOffsetPx, applies it to the
+ *      train's screen position, and writes a transform on the overlay
+ *
+ *  Hides the overlay when the train is off-screen with a small buffer so it
+ *  doesn't pop out abruptly when a train is half-off the edge. */
+function positionPopupOverlay(
+  el: HTMLDivElement,
+  map: maplibregl.Map,
+  feature: FeatureSnapshot,
+): void {
+  const trainScreen = map.project(feature.pos);
+  const canvas = map.getCanvas();
+  if (
+    trainScreen.x < -120 || trainScreen.x > canvas.clientWidth + 120 ||
+    trainScreen.y < -120 || trainScreen.y > canvas.clientHeight + 120
+  ) {
+    el.style.display = "none";
+    return;
+  }
+
+  // Project a point a small distance ahead of the train along its bearing,
+  // then take the screen-space delta as the motion vector. Doing perpendicular
+  // math purely in lng/lat would be wrong at high zoom where Mercator distorts.
+  const bearingRad = (feature.bearing * Math.PI) / 180;
+  const aheadLng = feature.pos[0] + Math.sin(bearingRad) * POPUP_AHEAD_DEG;
+  const aheadLat = feature.pos[1] + Math.cos(bearingRad) * POPUP_AHEAD_DEG;
+  const aheadScreen = map.project([aheadLng, aheadLat]);
+  const motion = { x: aheadScreen.x - trainScreen.x, y: aheadScreen.y - trainScreen.y };
+
+  const offset = popupOffsetPx(motion, POPUP_OFFSET_PX);
+  const popupX = trainScreen.x + offset.x;
+  const popupY = trainScreen.y + offset.y;
+
+  el.style.display = "block";
+  // translate(-50%, -50%) centers the popup on (popupX, popupY); the pixel
+  // translation comes first so it lands at the computed perpendicular offset.
+  el.style.transform = `translate(${popupX}px, ${popupY}px) translate(-50%, -50%)`;
+}
+
 interface TransitMapProps {
   geojsonRef: React.MutableRefObject<GeoJSON.FeatureCollection>;
   /** Mutates the GeoJSON in `geojsonRef` and returns whether anything
@@ -67,17 +134,23 @@ interface TransitMapProps {
   panelOpen: boolean;
 }
 
-interface PopupInfo {
-  train: TrainInfo;
-  lng: number;
-  lat: number;
-}
+/** Popup placement constants. The popup sits perpendicular to the train's
+ *  direction of travel (see popupOffsetPx) at a fixed pixel distance away,
+ *  far enough that it doesn't visually merge with the marker but close
+ *  enough that the relationship reads as "this popup is about that train".
+ *  The pointer/tail extends from the popup edge toward the train. */
+const POPUP_OFFSET_PX = 120;
+/** How many degrees of bearing in lng/lat to project the "ahead" point used
+ *  for screen-space motion direction. Small enough to be near the train
+ *  position so map curvature doesn't matter. */
+const POPUP_AHEAD_DEG = 0.001;
 
 export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, stops, planRoute, planRouteIds, mode, panelOpen }: TransitMapProps) {
-  const [popup, setPopup] = useState<PopupInfo | null>(null);
+  const [popupTripId, setPopupTripId] = useState<string | null>(null);
   const [iconsReady, setIconsReady] = useState(false);
   const [followTripId, setFollowTripId] = useState<string | null>(null);
   const mapRef = useRef<MapRef>(null);
+  const popupOverlayRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
   const viewportHeight = useViewportHeight();
 
@@ -87,6 +160,15 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
   useEffect(() => {
     followTripIdRef.current = followTripId;
   }, [followTripId]);
+
+  // Same pattern for popup tripId — the RAF loop needs to know which train
+  // is being followed by the popup overlay each frame, but we don't want to
+  // re-bind the entire animation effect every time the user opens or closes
+  // the popup.
+  const popupTripIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    popupTripIdRef.current = popupTripId;
+  }, [popupTripId]);
 
   // fitBounds padding compensates for whichever piece of UI covers the map.
   // The mobile bottom-sheet padding is computed from the live viewport
@@ -127,14 +209,20 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
           if (source && "setData" in source) {
             (source as { setData: (data: GeoJSON.FeatureCollection) => void }).setData(geojsonRef.current);
           }
-          const followId = followTripIdRef.current;
-          if (map && followId) {
-            const feature = geojsonRef.current.features.find(
-              (f) => f.properties?.tripId === followId,
-            );
-            if (feature && feature.geometry.type === "Point") {
-              const [lon, lat] = feature.geometry.coordinates as [number, number];
-              map.setCenter([lon, lat]);
+          if (map) {
+            const followId = followTripIdRef.current;
+            const popupId = popupTripIdRef.current;
+            // Follow target may differ from popup target — user can click
+            // another train to inspect it without breaking an active follow.
+            // Two lookups is fine; features array is typically <100 entries.
+            if (followId) {
+              const f = findFeatureById(geojsonRef.current.features, followId);
+              if (f) map.setCenter(f.pos);
+            }
+            if (popupId && popupOverlayRef.current) {
+              const f = findFeatureById(geojsonRef.current.features, popupId);
+              if (f) positionPopupOverlay(popupOverlayRef.current, map, f);
+              else popupOverlayRef.current.style.display = "none";
             }
           }
         }
@@ -160,6 +248,31 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
       map.off("dragstart", stop);
     };
   }, [followTripId]);
+
+  // Reposition the popup when the map view changes (zoom, pan, rotate, or
+  // resize). Without this the popup detaches from the train during user
+  // interaction: the train marker moves with the map (MapLibre handles
+  // that), but our popup's screen coordinates are only updated inside the
+  // RAF loop's `if (interpolateFrame())` guard — which returns false during
+  // the idle gap between polls. So a user dragging the map between polls
+  // would see the popup float over wrong territory until the next snapshot.
+  // `move` fires on every viewport change including programmatic ones, and
+  // is cheap to handle since we only do work when a popup is open.
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    if (!map) return;
+    const reposition = () => {
+      const popupId = popupTripIdRef.current;
+      if (!popupId || !popupOverlayRef.current) return;
+      const f = findFeatureById(geojsonRef.current.features, popupId);
+      if (f) positionPopupOverlay(popupOverlayRef.current, map, f);
+      else popupOverlayRef.current.style.display = "none";
+    };
+    map.on("move", reposition);
+    return () => {
+      map.off("move", reposition);
+    };
+  }, [geojsonRef]);
 
   // If the followed train falls out of the snapshot (5min stale eviction,
   // route filter, mode switch), clear follow so the camera doesn't lock to
@@ -397,26 +510,41 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     (e: MapLayerMouseEvent) => {
       const feature = e.features?.[0];
       if (!feature || !feature.properties) {
-        setPopup(null);
+        setPopupTripId(null);
         return;
       }
-      const props = feature.properties;
-      const train = trains.find((t) => t.tripId === props.tripId);
-      if (train) {
-        // Use animated position from GeoJSON feature
-        const geoFeature = geojsonRef.current.features.find(
-          (f) => f.properties?.tripId === props.tripId,
-        );
-        const coords = geoFeature?.geometry && "coordinates" in geoFeature.geometry
-          ? geoFeature.geometry.coordinates as [number, number]
-          : [train.longitude, train.latitude];
-        setPopup({ train, lng: coords[0], lat: coords[1] });
+      const tripId = feature.properties.tripId as string | undefined;
+      if (!tripId) {
+        setPopupTripId(null);
+        return;
+      }
+      // Verify the train still exists in the snapshot before opening — guards
+      // against a click event firing on a stale geojson feature whose train
+      // has aged out via the 5min TTL filter between paint and click.
+      if (trains.some((t) => t.tripId === tripId)) {
+        setPopupTripId(tripId);
       }
     },
-    [trains, geojsonRef],
+    [trains],
   );
 
+  // Look up the active popup's train data once per render. Reading from
+  // `trains` (state) is fine here because popup CONTENT only changes on
+  // poll cycles or filter toggles; per-frame position updates happen via
+  // direct DOM in the RAF loop and don't go through React.
+  const popupTrain = useMemo(
+    () => (popupTripId ? trains.find((t) => t.tripId === popupTripId) ?? null : null),
+    [popupTripId, trains],
+  );
+
+  // If the popup's train falls out of the snapshot (TTL eviction, mode flip,
+  // route filter), close the popup so it doesn't keep tracking a ghost.
+  useEffect(() => {
+    if (popupTripId && !popupTrain) setPopupTripId(null);
+  }, [popupTripId, popupTrain]);
+
   return (
+    <>
     <Map
       ref={mapRef}
       initialViewState={NYC_CENTER}
@@ -798,82 +926,28 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
         />
       </Source>
 
-      {/* Popup on click */}
-      {popup && (
-        <Popup
-          longitude={popup.lng}
-          latitude={popup.lat}
-          onClose={() => {
-            setPopup(null);
-            // Closing the popup is an explicit "I'm done with this train"
-            // signal — stop following too, otherwise the camera keeps
-            // chasing a train the user can't see details on anymore.
-            setFollowTripId(null);
-          }}
-          anchor="bottom"
-          closeButton={true}
-          closeOnClick={false}
-          style={{ maxWidth: 240 }}
-        >
-          <div style={{ color: "#1a1a2e", fontSize: 13, lineHeight: 1.5 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: 24,
-                  height: 24,
-                  borderRadius: "50%",
-                  background: popup.train.color,
-                  color: "#fff",
-                  fontWeight: 700,
-                  fontSize: 12,
-                }}
-              >
-                {popup.train.routeId}
-              </span>
-              <strong>{popup.train.destination}</strong>
-            </div>
-            <div>
-              {popup.train.status === "STOPPED_AT"
-                ? `At ${popup.train.currentStopName}`
-                : `En route to ${popup.train.currentStopName}`}
-            </div>
-            {popup.train.delay !== null && popup.train.delay !== 0 && (
-              <div style={{ color: popup.train.delay > 0 ? "#dc2626" : "#16a34a" }}>
-                {popup.train.delay > 0
-                  ? `${Math.round(popup.train.delay / 60)} min late`
-                  : `${Math.abs(Math.round(popup.train.delay / 60))} min early`}
-              </div>
-            )}
-            {(() => {
-              const following = followTripId === popup.train.tripId;
-              return (
-                <button
-                  onClick={() => setFollowTripId(following ? null : popup.train.tripId)}
-                  style={{
-                    marginTop: 8,
-                    width: "100%",
-                    minHeight: 36,
-                    padding: "0 10px",
-                    background: following ? "#1a1a2e" : popup.train.color,
-                    color: following ? "#fff" : "#fff",
-                    border: "none",
-                    borderRadius: 6,
-                    fontSize: 13,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                  }}
-                >
-                  {following ? "Stop following" : "Follow this train"}
-                </button>
-              );
-            })()}
-          </div>
-        </Popup>
-      )}
     </Map>
+    {/* Popup is a sibling of <Map>, not a child — it's a custom HTML
+        overlay (not react-map-gl's Popup) so we can update its position
+        per-frame via direct DOM mutation in the RAF loop without React
+        re-rendering the popup contents 30 times per second. */}
+    {popupTrain && (
+      <TrainPopup
+        ref={popupOverlayRef}
+        train={popupTrain}
+        following={followTripId === popupTrain.tripId}
+        onClose={() => {
+          setPopupTripId(null);
+          // Closing the popup is an explicit "I'm done with this train"
+          // signal — stop following too, otherwise the camera keeps
+          // chasing a train the user can't see details on anymore.
+          setFollowTripId(null);
+        }}
+        onToggleFollow={() =>
+          setFollowTripId(followTripId === popupTrain.tripId ? null : popupTrain.tripId)
+        }
+      />
+    )}
+    </>
   );
 }
