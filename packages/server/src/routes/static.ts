@@ -111,6 +111,12 @@ export function createStaticRouter(mode: Mode): Hono {
       const candidates: ShapeCandidate[] = [];
       const seenShapes = new Set<string>();
       for (const trip of Object.values(gtfs.trips)) {
+        // LIRR publishes scheduled rail-replacement bus service in trips.txt
+        // with shape_id intentionally empty (e.g. headsign "Mineola (Bus)").
+        // These shouldn't appear on the rail-track GeoJSON, so silently skip
+        // — distinguish from the truly-orphaned case below where a non-empty
+        // shape_id can't be resolved (real data integrity issue worth a warn).
+        if (!trip.shapeId) continue;
         const shapeKey = `${trip.routeId}-${trip.directionId}-${trip.shapeId}`;
         if (seenShapes.has(shapeKey)) continue;
         seenShapes.add(shapeKey);
