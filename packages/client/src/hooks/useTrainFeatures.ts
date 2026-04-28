@@ -134,9 +134,17 @@ export function useTrainFeatures(
     const d = lastDataRef.current;
     if (!d) return;
 
-    const visible = d.trains.filter((t) =>
-      visibleRoutes.has(t.routeId) && (!planRouteIds || planRouteIds.has(t.routeId)),
-    );
+    // When a plan is active it *overrides* the line filter — show only the
+    // routes the plan rides, regardless of which lines the user has toggled
+    // on/off. This matches the route-line layer's filter in TransitMap and
+    // gives the trip planner a "spotlight" feel: pick a J→F transfer trip
+    // and you see only J and F trains, even if the user previously hid J.
+    // ANDing with visibleRoutes here was the prior behavior and produced
+    // the surprising case where selecting a trip whose routes are filtered
+    // off makes all trains disappear.
+    const visible = planRouteIds
+      ? d.trains.filter((t) => planRouteIds.has(t.routeId))
+      : d.trains.filter((t) => visibleRoutes.has(t.routeId));
 
     // Deduplicate: within ~50m grid, keep one train per route
     const DEDUP_GRID = 0.0005;

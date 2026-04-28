@@ -102,6 +102,17 @@ export function TripPlanner({ stops, liveTrains = [], onPlanFound }: TripPlanner
     onPlanFound?.(plans[idx] ?? null);
   };
 
+  /** Dismiss the active plan and return the map to the default unfocused
+   *  state. Keeps the from/to inputs populated so the user can tweak and
+   *  re-search without retyping; only the rendered plan + the spotlight
+   *  on the map are cleared. */
+  const clearPlan = () => {
+    setPlans([]);
+    setActiveIdx(0);
+    setError(null);
+    onPlanFound?.(null);
+  };
+
   const swap = () => {
     setFrom(to);
     setTo(from);
@@ -142,9 +153,16 @@ export function TripPlanner({ stops, liveTrains = [], onPlanFound }: TripPlanner
         <button onClick={swap} title="Swap" style={swapBtnStyle}>⇅</button>
       </div>
 
-      <button onClick={handlePlan} disabled={loading} style={findBtnStyle}>
-        {loading ? "Finding…" : "Find Route"}
-      </button>
+      <div style={{ display: "flex", gap: 6 }}>
+        <button onClick={handlePlan} disabled={loading} style={{ ...findBtnStyle, flex: 1 }}>
+          {loading ? "Finding…" : "Find Route"}
+        </button>
+        {plans.length > 0 && (
+          <button onClick={clearPlan} style={clearBtnStyle} aria-label="Clear active plan">
+            Clear
+          </button>
+        )}
+      </div>
 
       {error && (
         <div style={{ marginTop: 8, color: "#f87171", fontSize: 12 }}>{error}</div>
@@ -425,6 +443,24 @@ const findBtnStyle: React.CSSProperties = {
   cursor: "pointer",
   fontSize: 13,
   fontWeight: 500,
+};
+
+/** Secondary action — sits next to Find Route only when a plan is active.
+ *  Lower-emphasis styling (transparent fill, dimmer text) so it doesn't
+ *  compete with the primary Find action for attention. */
+const clearBtnStyle: React.CSSProperties = {
+  marginTop: 8,
+  minHeight: 44,
+  padding: "0 14px",
+  background: "transparent",
+  border: "1px solid rgba(255,255,255,0.15)",
+  borderRadius: 6,
+  color: "#aaa",
+  cursor: "pointer",
+  fontSize: 13,
+  fontWeight: 500,
+  fontFamily: "inherit",
+  flexShrink: 0,
 };
 
 const tabBtnStyle: React.CSSProperties = {
