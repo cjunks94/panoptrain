@@ -13,8 +13,16 @@ test.describe("Mobile — core functionality", () => {
     expect(box!.height).toBeGreaterThan(400);
   });
 
-  test("filter panel opens and closes cleanly", async ({ page }) => {
+  test("filter panel opens and closes cleanly", async ({ page, viewport }) => {
     await page.goto("/");
+    // Mobile defaults the bottom sheet closed; desktop defaults the
+    // sidebar open. On mobile, open first so the close/reopen flow runs
+    // from a known-open state. The off-screen × button is still clickable
+    // when closed and would toggle to OPEN, inverting the assertion.
+    const isMobile = (viewport?.width ?? 1280) < 768;
+    if (isMobile) {
+      await page.getByRole("button", { name: "Filter Lines" }).click();
+    }
     await expect(page.getByRole("heading", { name: "Panoptrain" })).toBeVisible();
 
     // Close panel
@@ -107,9 +115,15 @@ test.describe("Mobile — Epic 4 readiness", () => {
       expect(box!.width, "× button width").toBeGreaterThanOrEqual(MIN_TOUCH);
     });
 
-    test("Filter Lines (re-open) button meets 44px touch target", async ({ page }) => {
+    test("Filter Lines (re-open) button meets 44px touch target", async ({ page, viewport }) => {
       await page.goto("/");
-      await page.getByRole("button", { name: "×" }).click();
+      // On desktop the panel is open by default; close it first so the
+      // re-open button shows. On mobile the panel is closed by default —
+      // skip the × click since "Filter Lines" is already on screen.
+      const isMobile = (viewport?.width ?? 1280) < 768;
+      if (!isMobile) {
+        await page.getByRole("button", { name: "×" }).click();
+      }
       const box = await page.getByRole("button", { name: "Filter Lines" }).boundingBox();
       expect(box).not.toBeNull();
       expect(box!.height).toBeGreaterThanOrEqual(MIN_TOUCH);
@@ -120,6 +134,9 @@ test.describe("Mobile — Epic 4 readiness", () => {
     test("panel renders as a full-width bottom sheet on mobile", async ({ page, viewport }) => {
       test.skip(!viewport || viewport.width >= 768, "mobile viewports only");
       await page.goto("/");
+      // Mobile defaults the panel closed (off-screen at bottom: -100%);
+      // open it so the geometry assertions test the on-screen layout.
+      await page.getByRole("button", { name: "Filter Lines" }).click();
       await expect(page.getByRole("heading", { name: "Panoptrain" })).toBeVisible();
 
       const panelBox = await page.evaluate(() => {
@@ -148,6 +165,9 @@ test.describe("Mobile — Epic 4 readiness", () => {
     test("dismissing the bottom sheet reveals a full-height map", async ({ page, viewport }) => {
       test.skip(!viewport || viewport.width >= 768, "mobile viewports only");
       await page.goto("/");
+      // Mobile defaults the panel closed; open it first to verify the
+      // dismiss action restores a full-height map.
+      await page.getByRole("button", { name: "Filter Lines" }).click();
       await expect(page.getByRole("heading", { name: "Panoptrain" })).toBeVisible();
       await page.getByRole("button", { name: "×" }).click();
       await expect(page.getByRole("button", { name: "Filter Lines" })).toBeVisible();

@@ -55,6 +55,15 @@ export function useTrainPositions(mode: Mode): UseTrainPositionsResult {
   // 30s on a background tab); when visible we poll once immediately for fresh
   // data, then restart the interval so cadence is clean rather than racing
   // a partially-elapsed timer.
+  //
+  // Mobile gotcha: iOS Safari fires `visibilitychange` inconsistently when
+  // the user app-switches or pulls down notification center, and aggressively
+  // throttles setInterval in the background. The result was the user
+  // returning to a stale map with frozen trains. Adding `pageshow`
+  // (fires on bfcache restore — the most common iOS return path) and
+  // `focus` as additional resume signals so any path back to the tab
+  // triggers an immediate fresh fetch. start() is idempotent — calling it
+  // multiple times just clears and restarts the interval.
   useEffect(() => {
     const start = () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -72,16 +81,32 @@ export function useTrainPositions(mode: Mode): UseTrainPositionsResult {
     if (isHidden) stop();
     else start();
 
-    if (typeof document === "undefined") {
+    if (typeof document === "undefined" || typeof window === "undefined") {
       return stop;
     }
     const onVisChange = () => {
       if (document.visibilityState === "visible") start();
       else stop();
     };
+    // pageshow fires on every page load, including the cold initial render
+    // — but the mount path above already calls start(), so re-running here
+    // would double-poll. Gate on e.persisted, which is true only when the
+    // page is restored from bfcache (the iOS back-button / app-switch
+    // return path that visibilitychange misses).
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (!e.persisted) return;
+      if (document.visibilityState !== "hidden") start();
+    };
+    const onFocus = () => {
+      if (document.visibilityState !== "hidden") start();
+    };
     document.addEventListener("visibilitychange", onVisChange);
+    window.addEventListener("pageshow", onPageShow);
+    window.addEventListener("focus", onFocus);
     return () => {
       document.removeEventListener("visibilitychange", onVisChange);
+      window.removeEventListener("pageshow", onPageShow);
+      window.removeEventListener("focus", onFocus);
       stop();
     };
   }, [poll]);

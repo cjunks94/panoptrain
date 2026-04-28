@@ -9,13 +9,22 @@ import { useTrainFeatures } from "./hooks/useTrainFeatures.js";
 import { useRouteShapes } from "./hooks/useRouteShapes.js";
 import { useLineFilter } from "./hooks/useLineFilter.js";
 import { useMode } from "./hooks/useMode.js";
+import { MOBILE_QUERY } from "./hooks/useIsMobile.js";
 
 export default function App() {
   const [mode, setMode] = useMode();
   const { data, isStale, lastUpdated } = useTrainPositions(mode);
   const { routeShapes, stopsGeoJson } = useRouteShapes(mode);
   const { visibleRoutes, toggleRoute, toggleGroup, allOn, allOff } = useLineFilter(mode);
-  const [panelOpen, setPanelOpen] = useState(true);
+  // Default closed on mobile so the bottom sheet doesn't take up 75vh on
+  // first paint — users land on the map, then tap to filter. Desktop keeps
+  // the sidebar open by default since it doesn't cover the map. One-shot
+  // matchMedia (not the reactive useIsMobile hook) so a desktop user
+  // resizing down to mobile width doesn't have the panel slammed shut.
+  const [panelOpen, setPanelOpen] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return !window.matchMedia(MOBILE_QUERY).matches;
+  });
   const [planRoute, setPlanRoute] = useState<TripPlan | null>(null);
 
   // When a plan is active, surface only the routes that plan rides — these

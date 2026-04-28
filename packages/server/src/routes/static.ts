@@ -32,6 +32,67 @@ export function stationImportance(mode: Mode, stopName: string, routeCount: numb
   return 0;
 }
 
+export interface ShapeCandidate {
+  shapeId: string;
+  routeId: string;
+  directionId: number;
+  coordCount: number;
+  /** Ordered stop_ids the trip visits along this shape. */
+  stopSequence: string[];
+}
+
+/** Pick which shapes to emit on `/routes`. For each (route, direction):
+ *  always keep the longest shape, then add extras only when an endpoint
+ *  reaches a terminal stop the main shape doesn't touch.
+ *
+ *  Why: "longest per route+direction" alone silently dropped track for LIRR
+ *  branches with multiple western terminals (e.g. Babylon trips end at Penn,
+ *  Atlantic Terminal, AND Grand Central — only Penn won by length, leaving
+ *  Atlantic / GCT lines grey). Including every distinct (origin, terminus)
+ *  pair instead would balloon subway 2.5x with short-turn variants whose
+ *  endpoints are mid-line on the main shape — visually invisible overlays
+ *  that just bloat the /routes payload.
+ *
+ *  Exported for unit tests so we can pin both the LIRR multi-terminal case
+ *  and the subway short-turn-suppression case without spinning up Hono. */
+export function pickShapes(candidates: ShapeCandidate[]): ShapeCandidate[] {
+  const grouped = new Map<string, ShapeCandidate[]>();
+  for (const c of candidates) {
+    if (c.coordCount < 2 || c.stopSequence.length < 2) continue;
+    const key = `${c.routeId}-${c.directionId}`;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key)!.push(c);
+  }
+
+  const selected: ShapeCandidate[] = [];
+  for (const group of grouped.values()) {
+    group.sort((a, b) => b.coordCount - a.coordCount);
+    const main = group[0];
+    selected.push(main);
+    const mainStops = new Set(main.stopSequence);
+    const extraCovered = new Set<string>();
+    for (let i = 1; i < group.length; i++) {
+      const c = group[i];
+      const firstStop = c.stopSequence[0];
+      const lastStop = c.stopSequence[c.stopSequence.length - 1];
+      // Collect every endpoint that's NOT on the main shape (a candidate
+      // can have one new endpoint OR both new — e.g. an entirely separate
+      // branch sharing only mid-line stops with the main shape). Emit if
+      // any of those new terminals isn't already covered by a previously
+      // emitted extra; mark all of them covered together so the next
+      // candidate doesn't re-introduce one.
+      const newTerminals: string[] = [];
+      if (!mainStops.has(firstStop)) newTerminals.push(firstStop);
+      if (!mainStops.has(lastStop)) newTerminals.push(lastStop);
+      if (newTerminals.length === 0) continue;
+      if (newTerminals.every((t) => extraCovered.has(t))) continue;
+      for (const t of newTerminals) extraCovered.add(t);
+      selected.push(c);
+    }
+  }
+  return selected;
+}
+
 /** Build a `/api/<mode>` router with /routes and /stops endpoints. The
  *  GeoJSON caches are scoped per mode so subway and LIRR don't trample each
  *  other's data. */
@@ -45,42 +106,49 @@ export function createStaticRouter(mode: Mode): Hono {
     if (!routesGeoJson) {
       const gtfs = loadStaticGtfs(mode);
 
-      // For each route+direction, pick the LONGEST shape (most coordinates)
-      // as the representative. The naive "first trip wins" approach silently
-      // drops track when a route has multiple service patterns sharing a
-      // common segment — e.g. LIRR Port Jefferson Branch has 23 shape
-      // variants; the most-frequent is Penn→Huntington (electric service)
-      // while a smaller fraction of trips extend Huntington→Port Jefferson
-      // (diesel). Picking by max coordinates gives full geographic extent
-      // because longer service patterns are supersets of shorter ones.
-      const longestPerRouteDir = new Map<string, { trip: typeof gtfs.trips[string]; coordCount: number }>();
+      // Build candidate list: one entry per unique (route, direction, shape)
+      // pattern, with its stop sequence pulled from the pre-built map.
+      const candidates: ShapeCandidate[] = [];
+      const seenShapes = new Set<string>();
       for (const trip of Object.values(gtfs.trips)) {
+        const shapeKey = `${trip.routeId}-${trip.directionId}-${trip.shapeId}`;
+        if (seenShapes.has(shapeKey)) continue;
+        seenShapes.add(shapeKey);
         const shape = gtfs.shapes[trip.shapeId];
-        if (!shape || shape.coordinates.length < 2) continue;
-        const key = `${trip.routeId}-${trip.directionId}`;
-        const current = longestPerRouteDir.get(key);
-        if (!current || shape.coordinates.length > current.coordCount) {
-          longestPerRouteDir.set(key, { trip, coordCount: shape.coordinates.length });
+        if (!shape) {
+          console.warn(`[${mode}] /routes: shape ${trip.shapeId} referenced by trip ${trip.tripId} not found in shapes index — excluded`);
+          continue;
         }
+        const sequence = gtfs.stopSequences[shapeKey];
+        if (!sequence) {
+          console.warn(`[${mode}] /routes: stop sequence missing for ${shapeKey} — excluded`);
+          continue;
+        }
+        candidates.push({
+          shapeId: trip.shapeId,
+          routeId: trip.routeId,
+          directionId: trip.directionId,
+          coordCount: shape.coordinates.length,
+          stopSequence: sequence.map((s) => s.stopId),
+        });
       }
 
       const features: RouteFeature[] = [];
-      for (const { trip } of longestPerRouteDir.values()) {
-        const shape = gtfs.shapes[trip.shapeId]!;
-
+      for (const c of pickShapes(candidates)) {
+        const shape = gtfs.shapes[c.shapeId]!;
         // Prefer the per-mode static GTFS data (correct colors for both subway
         // and LIRR). Fall back to ROUTE_INFO for any subway lines whose GTFS
         // route_color is missing. Falling back to ROUTE_INFO without checking
         // mode would hijack LIRR route IDs (e.g. LIRR "1" Babylon green
         // collides with subway "1" red).
-        const gtfsRoute = gtfs.routes[trip.routeId];
-        const subwayInfo = mode === "subway" ? ROUTE_INFO[trip.routeId] : undefined;
+        const gtfsRoute = gtfs.routes[c.routeId];
+        const subwayInfo = mode === "subway" ? ROUTE_INFO[c.routeId] : undefined;
         features.push({
           type: "Feature",
           properties: {
-            routeId: trip.routeId,
+            routeId: c.routeId,
             color: gtfsRoute?.color ?? subwayInfo?.color ?? "#808183",
-            name: gtfsRoute?.longName ?? subwayInfo?.name ?? trip.routeId,
+            name: gtfsRoute?.longName ?? subwayInfo?.name ?? c.routeId,
           },
           geometry: {
             type: "LineString",
