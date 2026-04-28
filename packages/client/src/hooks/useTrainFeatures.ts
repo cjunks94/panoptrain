@@ -64,6 +64,11 @@ export function useTrainFeatures(
   const snapshotTime = useRef(0);
   const lastDataRef = useRef<TrainsResponse | null>(null);
   const shapeIndexRef = useRef<Record<string, ReturnType<typeof buildShapeIndex>[string]>>({});
+  // Tracks the interpolation fraction last written to the GeoJSON. Lets the
+  // RAF loop skip the expensive setData() when nothing changed since last
+  // frame (steady state at fraction=1 between polls). Reset to -1 whenever
+  // the feature set changes so filter toggles still trigger a redraw.
+  const lastRenderedFraction = useRef(-1);
   const [trains, setTrains] = useState<TrainInfo[]>([]);
 
   // Build shape index once when route shapes load
@@ -75,8 +80,22 @@ export function useTrainFeatures(
   // Shift position snapshots when new data arrives (fast — no heavy computation)
   useEffect(() => {
     if (!data || data === lastDataRef.current) return;
+    const isFirstPoll = lastDataRef.current === null;
     lastDataRef.current = data;
-    prevPositions.current = currPositions.current;
+
+    // Bootstrap path: on the very first poll, prevPositions is empty so the
+    // RAF loop snaps every train to its current position and they sit
+    // motionless until the second poll arrives 30s later. The server now
+    // ships the previous snapshot alongside the current one — seed
+    // prevPositions from it so interpolation kicks in on the first frame.
+    if (isFirstPoll && data.previous && data.previous.trains.length > 0) {
+      const seed = new Map<string, [number, number]>();
+      for (const t of data.previous.trains) seed.set(t.tripId, [t.longitude, t.latitude]);
+      prevPositions.current = seed;
+    } else {
+      prevPositions.current = currPositions.current;
+    }
+
     const positions = new Map<string, [number, number]>();
     for (const t of data.trains) {
       positions.set(t.tripId, [t.longitude, t.latitude]);
@@ -187,6 +206,10 @@ export function useTrainFeatures(
     }
 
     geojsonRef.current = { type: "FeatureCollection", features };
+    // Force the next RAF tick to push setData even if the interpolation
+    // fraction is unchanged — the feature set itself is new (different
+    // routes visible, mode flipped, etc.), so MapLibre needs the update.
+    lastRenderedFraction.current = -1;
 
     // Update popup-lookup trains (triggers one React render)
     setTrains(deduped.map((t) => {
@@ -201,10 +224,22 @@ export function useTrainFeatures(
     }));
   }, [data, visibleRoutes, planRouteIds, mode]);
 
-  // Mutate GeoJSON coordinates in-place for animation — called by RAF loop
-  const interpolateFrame = useCallback(() => {
+  // Mutate GeoJSON coordinates in-place for animation — called by RAF loop.
+  // Returns true if the frame did work (caller should push setData), false
+  // if it was a no-op (steady state at fraction=1, nothing to redraw).
+  const interpolateFrame = useCallback((): boolean => {
     const elapsed = Date.now() - snapshotTime.current;
     const fraction = Math.min(elapsed / POLL_INTERVAL, 1);
+
+    // Skip when the snapshot is fully consumed and we already pushed the
+    // settled frame. Saves one setData per RAF tick during the idle gap
+    // between polls — a measurable chunk of the per-frame cost since
+    // setData re-uploads the whole GeoJSON to MapLibre. The features-build
+    // effect resets lastRenderedFraction to -1 so filter toggles and new
+    // data still trigger a redraw.
+    if (fraction === 1 && lastRenderedFraction.current === 1) return false;
+    lastRenderedFraction.current = fraction;
+
     const prev = prevPositions.current;
     const curr = currPositions.current;
     const paths = trackPaths.current;
@@ -239,6 +274,7 @@ export function useTrainFeatures(
         features[i].geometry.coordinates[1] = p[1] + (c[1] - p[1]) * fraction;
       }
     }
+    return true;
   }, []);
 
   return { geojsonRef, interpolateFrame, trains };

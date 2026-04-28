@@ -11,7 +11,12 @@ import type { GeoJSON } from "geojson";
 
 const BASEMAP = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 const NYC_CENTER = { longitude: -73.98, latitude: 40.75, zoom: 12 };
-const FRAME_INTERVAL = 66; // ~15fps
+// 30fps. Higher than the previous 15fps because the dirty-flag guard in
+// interpolateFrame means we no longer pay the per-frame setData() cost
+// during the idle gap between polls — only during the ~30s of active
+// motion after each new snapshot. Smoother visible animation, same total
+// CPU budget.
+const FRAME_INTERVAL = 33;
 
 /** Generate a filled circle as SDF-compatible ImageData */
 function createCircleIcon(size: number): ImageData {
@@ -44,7 +49,9 @@ function createSquareIcon(size: number): ImageData {
 
 interface TransitMapProps {
   geojsonRef: React.MutableRefObject<GeoJSON.FeatureCollection>;
-  interpolateFrame: () => void;
+  /** Mutates the GeoJSON in `geojsonRef` and returns whether anything
+   *  changed. Caller skips the `setData` upload when it returns false. */
+  interpolateFrame: () => boolean;
   trains: TrainInfo[];
   routeShapes: RoutesGeoJSON | null;
   stops: StopsGeoJSON | null;
@@ -108,20 +115,27 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
       const now = Date.now();
       if (now - lastFrame >= FRAME_INTERVAL) {
         lastFrame = now;
-        interpolateFrame();
-        const map = mapRef.current?.getMap();
-        const source = map?.getSource("trains");
-        if (source && "setData" in source) {
-          (source as { setData: (data: GeoJSON.FeatureCollection) => void }).setData(geojsonRef.current);
-        }
-        const followId = followTripIdRef.current;
-        if (map && followId) {
-          const feature = geojsonRef.current.features.find(
-            (f) => f.properties?.tripId === followId,
-          );
-          if (feature && feature.geometry.type === "Point") {
-            const [lon, lat] = feature.geometry.coordinates as [number, number];
-            map.setCenter([lon, lat]);
+        // interpolateFrame returns false when the snapshot is fully consumed
+        // and nothing's changed since last frame — skip the setData upload
+        // AND the camera-follow recenter in that case. Big win: between
+        // polls, RAF still fires but we no longer re-upload the full GeoJSON
+        // to MapLibre 30 times per second. Camera-follow is also a no-op
+        // when the followed train's coordinates didn't change this frame.
+        if (interpolateFrame()) {
+          const map = mapRef.current?.getMap();
+          const source = map?.getSource("trains");
+          if (source && "setData" in source) {
+            (source as { setData: (data: GeoJSON.FeatureCollection) => void }).setData(geojsonRef.current);
+          }
+          const followId = followTripIdRef.current;
+          if (map && followId) {
+            const feature = geojsonRef.current.features.find(
+              (f) => f.properties?.tripId === followId,
+            );
+            if (feature && feature.geometry.type === "Point") {
+              const [lon, lat] = feature.geometry.coordinates as [number, number];
+              map.setCenter([lon, lat]);
+            }
           }
         }
       }
