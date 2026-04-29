@@ -115,6 +115,19 @@ function findBestShape(
 interface LineData { line: ReturnType<typeof lineString>; totalLength: number }
 const lineCacheByGtfs = new WeakMap<StaticGtfsData, Map<string, LineData>>();
 
+/** Pre-build the per-gtfs lookup indexes and line geometries so the first
+ *  poll's `interpolatePositions` doesn't pay for ~20k trip indexing inline.
+ *  Call once per mode at startup, after `loadStaticGtfs` and before
+ *  `startPolling`. Idempotent (re-calls hit the cached results). */
+export function prewarmInterpolator(gtfs: StaticGtfsData): void {
+  const start = Date.now();
+  getLookups(gtfs);
+  for (const shapeId of Object.keys(gtfs.shapes)) {
+    getLine(shapeId, gtfs);
+  }
+  console.log(`  Prewarmed interpolator caches in ${Date.now() - start}ms`);
+}
+
 /** Compute bearing at a given distance along a line by looking 50m in each direction */
 function bearingAtDist(lineData: LineData, dist: number): number | null {
   const behind = Math.max(0, dist - 0.05);
