@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { enrichWithStatic, interpolatePositions } from "../position-interpolator.js";
+import { describe, it, expect, vi } from "vitest";
+import { enrichWithStatic, interpolatePositions, prewarmInterpolator } from "../position-interpolator.js";
 import type { StaticGtfsData } from "../gtfs-loader.js";
 import type { ParsedVehicle } from "@panoptrain/shared";
 
@@ -163,5 +163,45 @@ describe("interpolatePositions cross-mode isolation", () => {
     expect(subwayTrains).toHaveLength(1);
     expect(subwayTrains[0].routeId).toBe("A");
     expect(subwayTrains[0].destination).toBe("Far Rockaway");
+  });
+});
+
+/**
+ * Pre-build per-gtfs lookups at startup so the first poll's interpolate call
+ * doesn't pay for indexing 20k trips inline. The pin: after `prewarmInterpolator`,
+ * a subsequent `interpolatePositions` must not log the "Built route->shape lookup"
+ * line — that log happens once, when getLookups builds the indexes for a gtfs
+ * object it hasn't seen. Pre-fix, that log fires on the first poll; post-fix it
+ * fires inside prewarm.
+ */
+describe("prewarmInterpolator", () => {
+  function makeGtfs(): StaticGtfsData {
+    return {
+      stops: { S1: { stopId: "S1", stopName: "S1", lat: 0, lon: 0, parentStation: null } },
+      routes: { "1": { routeId: "1", shortName: "1", longName: "1", color: "000", textColor: "FFF" } },
+      shapes: { sh1: { shapeId: "sh1", coordinates: [[0, 0], [0.01, 0]] } },
+      trips: { t1: { tripId: "t1", routeId: "1", shapeId: "sh1", directionId: 0, tripHeadsign: "H" } },
+      stopSequences: { "1-0-sh1": [{ stopId: "S1", stopSequence: 1 }] },
+      stopDistances: { sh1: { S1: 0 } },
+    };
+  }
+
+  it("populates lookups so subsequent interpolatePositions does not rebuild them", () => {
+    const gtfs = makeGtfs();
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    prewarmInterpolator(gtfs);
+    const buildLogsAfterPrewarm = logSpy.mock.calls.filter((c) =>
+      typeof c[0] === "string" && c[0].includes("Built route->shape lookup"),
+    ).length;
+    expect(buildLogsAfterPrewarm).toBe(1);
+
+    interpolatePositions([], [], gtfs);
+    const buildLogsAfterInterpolate = logSpy.mock.calls.filter((c) =>
+      typeof c[0] === "string" && c[0].includes("Built route->shape lookup"),
+    ).length;
+    expect(buildLogsAfterInterpolate).toBe(1); // still 1 — interpolate hit the cache
+
+    logSpy.mockRestore();
   });
 });

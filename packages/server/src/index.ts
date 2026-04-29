@@ -7,6 +7,7 @@ import { join, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadStaticGtfs } from "./services/gtfs-loader.js";
 import { startPolling } from "./services/mta-poller.js";
+import { prewarmInterpolator } from "./services/position-interpolator.js";
 import { createTrainsRouter } from "./routes/trains.js";
 import { createStaticRouter } from "./routes/static.js";
 import plan from "./routes/plan.js";
@@ -85,6 +86,7 @@ if (existsSync(join(clientDist, "index.html"))) {
 // optional (logs a warning and skips if data isn't downloaded yet).
 try {
   const subwayGtfs = loadStaticGtfs("subway");
+  prewarmInterpolator(subwayGtfs);
   startPolling("subway", subwayGtfs, POLL_INTERVAL);
 } catch (err) {
   console.error("Failed to load subway GTFS data:", err);
@@ -93,6 +95,7 @@ try {
 
 try {
   const lirrGtfs = loadStaticGtfs("lirr");
+  prewarmInterpolator(lirrGtfs);
   startPolling("lirr", lirrGtfs, POLL_INTERVAL);
 } catch (err) {
   console.warn("LIRR GTFS data not available — skipping. Run \"pnpm download-gtfs lirr\" to enable LIRR.");
