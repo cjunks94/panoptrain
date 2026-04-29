@@ -103,30 +103,59 @@ export function useTrainFeatures(
     currPositions.current = positions;
     snapshotTime.current = Date.now();
 
-    // Defer track path computation off the main thread.
-    // First animation frames use linear interpolation; paths are ready by ~next frame.
+    // Defer track path computation in chunks so a large first poll (LIRR +
+    // subway combined) doesn't block the main thread for hundreds of ms.
+    // Trains without a computed path yet animate via linear fallback — the
+    // RAF loop already handles missing entries — so animation degrades
+    // gracefully from straight-line to on-rail as chunks land.
     const MIN_DIST_SQ = 0.002 * 0.002; // ~200m in degrees
+    const CHUNK_SIZE = 25;
     const trainsToProcess = data.trains;
     const prev = prevPositions.current;
     const index = shapeIndexRef.current;
 
-    const tid = setTimeout(() => {
-      const paths = new Map<string, TrackPath>();
-      if (Object.keys(index).length > 0) {
-        for (const t of trainsToProcess) {
-          const p = prev.get(t.tripId);
-          if (!p) continue;
-          const dx = t.longitude - p[0];
-          const dy = t.latitude - p[1];
-          if (dx * dx + dy * dy < MIN_DIST_SQ) continue;
-          const path = findTrackPath(index, t.routeId, p, [t.longitude, t.latitude]);
-          if (path) paths.set(t.tripId, path);
-        }
-      }
-      trackPaths.current = paths;
-    }, 0);
+    const paths = new Map<string, TrackPath>();
+    trackPaths.current = paths;
 
-    return () => clearTimeout(tid);
+    let cancelled = false;
+    let idleHandle: number | null = null;
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+
+    const schedule = (cb: () => void) => {
+      if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function") {
+        idleHandle = window.requestIdleCallback(cb, { timeout: 200 });
+      } else {
+        timeoutHandle = setTimeout(cb, 0);
+      }
+    };
+
+    const processChunk = (start: number) => {
+      if (cancelled || Object.keys(index).length === 0) return;
+      const end = Math.min(start + CHUNK_SIZE, trainsToProcess.length);
+      for (let i = start; i < end; i++) {
+        const t = trainsToProcess[i];
+        const p = prev.get(t.tripId);
+        if (!p) continue;
+        const dx = t.longitude - p[0];
+        const dy = t.latitude - p[1];
+        if (dx * dx + dy * dy < MIN_DIST_SQ) continue;
+        const path = findTrackPath(index, t.routeId, p, [t.longitude, t.latitude]);
+        if (path) paths.set(t.tripId, path);
+      }
+      if (end < trainsToProcess.length) {
+        schedule(() => processChunk(end));
+      }
+    };
+
+    schedule(() => processChunk(0));
+
+    return () => {
+      cancelled = true;
+      if (idleHandle !== null && typeof window !== "undefined" && typeof window.cancelIdleCallback === "function") {
+        window.cancelIdleCallback(idleHandle);
+      }
+      if (timeoutHandle !== null) clearTimeout(timeoutHandle);
+    };
   }, [data]);
 
   // Rebuild features when data or visibleRoutes change
