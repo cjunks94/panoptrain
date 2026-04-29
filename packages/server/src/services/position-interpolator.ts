@@ -6,9 +6,16 @@ import type { TrainPosition, ParsedVehicle, ParsedTripUpdate } from "@panoptrain
 import type { StaticGtfsData } from "./gtfs-loader.js";
 
 /**
- * Pre-computed lookups, built once:
+ * Pre-computed lookups, built once per StaticGtfsData object:
  * 1. route+direction -> ALL shapes (for branching routes like A/E)
  * 2. stopId -> which shapes contain it (for matching trains to correct branch)
+ *
+ * Keyed by gtfs identity via WeakMap so subway and LIRR each get their own
+ * lookups. Without this, whichever mode polls first wins the module-level
+ * tables and the other mode's trains get matched against the wrong shapes —
+ * subway 1/2/3/... routeIds happen to overlap LIRR's numeric routeIds, so
+ * subway trains end up "running on" LIRR rails and lettered routes (no LIRR
+ * counterpart) get dropped entirely by `findBestShape`.
  */
 interface RouteShape {
   shapeId: string;
@@ -16,16 +23,23 @@ interface RouteShape {
   patternKey: string; // "routeId-directionId-shapeId"
 }
 
-let allRouteShapes: Map<string, RouteShape[]> | null = null;
-let stopToShapes: Map<string, RouteShape[]> | null = null;
-let crossRouteStopToShapes: Map<string, RouteShape[]> | null = null;
+interface Lookups {
+  allRouteShapes: Map<string, RouteShape[]>;
+  stopToShapes: Map<string, RouteShape[]>;
+  crossRouteStopToShapes: Map<string, RouteShape[]>;
+}
 
-function buildLookups(gtfs: StaticGtfsData): void {
-  if (allRouteShapes) return;
+const lookupsByGtfs = new WeakMap<StaticGtfsData, Lookups>();
 
-  allRouteShapes = new Map();
-  stopToShapes = new Map();
-  crossRouteStopToShapes = new Map();
+function getLookups(gtfs: StaticGtfsData): Lookups {
+  const cached = lookupsByGtfs.get(gtfs);
+  if (cached) return cached;
+
+  const lk: Lookups = {
+    allRouteShapes: new Map(),
+    stopToShapes: new Map(),
+    crossRouteStopToShapes: new Map(),
+  };
   const seen = new Set<string>();
 
   for (const trip of Object.values(gtfs.trips)) {
@@ -40,28 +54,29 @@ function buildLookups(gtfs: StaticGtfsData): void {
       patternKey: shapeKey,
     };
 
-    if (!allRouteShapes.has(routeKey)) allRouteShapes.set(routeKey, []);
-    allRouteShapes.get(routeKey)!.push(rs);
+    if (!lk.allRouteShapes.has(routeKey)) lk.allRouteShapes.set(routeKey, []);
+    lk.allRouteShapes.get(routeKey)!.push(rs);
 
-    // Index every stop on this shape
     const dists = gtfs.stopDistances[trip.shapeId];
     if (dists) {
       for (const stopId of Object.keys(dists)) {
         const stopKey = `${trip.routeId}-${trip.directionId}-${stopId}`;
-        if (!stopToShapes.has(stopKey)) stopToShapes.set(stopKey, []);
-        stopToShapes.get(stopKey)!.push(rs);
+        if (!lk.stopToShapes.has(stopKey)) lk.stopToShapes.set(stopKey, []);
+        lk.stopToShapes.get(stopKey)!.push(rs);
 
-        // Cross-route index: any shape containing this stop, regardless of route
         const crossKey = `${trip.directionId}-${stopId}`;
-        if (!crossRouteStopToShapes.has(crossKey)) crossRouteStopToShapes.set(crossKey, []);
-        crossRouteStopToShapes.get(crossKey)!.push(rs);
+        if (!lk.crossRouteStopToShapes.has(crossKey)) lk.crossRouteStopToShapes.set(crossKey, []);
+        lk.crossRouteStopToShapes.get(crossKey)!.push(rs);
       }
     }
   }
 
   let totalShapes = 0;
-  for (const shapes of allRouteShapes.values()) totalShapes += shapes.length;
-  console.log(`  Built route->shape lookup: ${allRouteShapes.size} route+direction combos, ${totalShapes} total shapes`);
+  for (const shapes of lk.allRouteShapes.values()) totalShapes += shapes.length;
+  console.log(`  Built route->shape lookup: ${lk.allRouteShapes.size} route+direction combos, ${totalShapes} total shapes`);
+
+  lookupsByGtfs.set(gtfs, lk);
+  return lk;
 }
 
 /**
@@ -74,29 +89,31 @@ function findBestShape(
   stopId: string,
   gtfs: StaticGtfsData,
 ): RouteShape | null {
-  buildLookups(gtfs);
+  const lk = getLookups(gtfs);
 
   // Pass 1: Exact route+stop match — handles normal operation and branching routes
   const stopKey = `${routeId}-${directionId}-${stopId}`;
-  const byStop = stopToShapes!.get(stopKey);
+  const byStop = lk.stopToShapes.get(stopKey);
   if (byStop && byStop.length > 0) return byStop[0];
 
   // Pass 2: Cross-route stop match — handles rerouted trains (e.g., 1 on A/C/E tracks)
   const crossKey = `${directionId}-${stopId}`;
-  const byCrossStop = crossRouteStopToShapes!.get(crossKey);
+  const byCrossStop = lk.crossRouteStopToShapes.get(crossKey);
   if (byCrossStop && byCrossStop.length > 0) return byCrossStop[0];
 
   // Pass 3: Any shape for this route+direction (last resort)
   const routeKey = `${routeId}-${directionId}`;
-  const all = allRouteShapes!.get(routeKey);
+  const all = lk.allRouteShapes.get(routeKey);
   if (all && all.length > 0) return all[0];
 
   return null;
 }
 
-// Cache lineString + length computations per shape
+// Cache lineString + length computations per shape, keyed by gtfs identity
+// so subway and LIRR don't collide on shape IDs (and so reloading static GTFS
+// in tests doesn't serve stale geometries).
 interface LineData { line: ReturnType<typeof lineString>; totalLength: number }
-const lineCache = new Map<string, LineData>();
+const lineCacheByGtfs = new WeakMap<StaticGtfsData, Map<string, LineData>>();
 
 /** Compute bearing at a given distance along a line by looking 50m in each direction */
 function bearingAtDist(lineData: LineData, dist: number): number | null {
@@ -109,7 +126,12 @@ function bearingAtDist(lineData: LineData, dist: number): number | null {
 }
 
 function getLine(shapeId: string, gtfs: StaticGtfsData): LineData | null {
-  let cached = lineCache.get(shapeId);
+  let cache = lineCacheByGtfs.get(gtfs);
+  if (!cache) {
+    cache = new Map();
+    lineCacheByGtfs.set(gtfs, cache);
+  }
+  let cached = cache.get(shapeId);
   if (cached) return cached;
 
   const shape = gtfs.shapes[shapeId];
@@ -118,7 +140,7 @@ function getLine(shapeId: string, gtfs: StaticGtfsData): LineData | null {
   const line = lineString(shape.coordinates);
   const totalLength = turfLength(line);
   cached = { line, totalLength };
-  lineCache.set(shapeId, cached);
+  cache.set(shapeId, cached);
   return cached;
 }
 
@@ -143,7 +165,7 @@ export function interpolatePositions(
   gtfs: StaticGtfsData,
 ): TrainPosition[] {
   const now = Math.floor(Date.now() / 1000);
-  buildLookups(gtfs);
+  getLookups(gtfs);
 
   vehicles = vehicles.map((v) => enrichWithStatic(v, gtfs));
   tripUpdates = tripUpdates.map((tu) => enrichWithStatic(tu, gtfs));
