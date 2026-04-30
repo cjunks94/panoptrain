@@ -103,13 +103,16 @@ export function useTrainFeatures(
     currPositions.current = positions;
     snapshotTime.current = Date.now();
 
-    // Defer track path computation in chunks so a large first poll (LIRR +
-    // subway combined) doesn't block the main thread for hundreds of ms.
-    // Trains without a computed path yet animate via linear fallback — the
-    // RAF loop already handles missing entries — so animation degrades
-    // gracefully from straight-line to on-rail as chunks land.
+    // Defer track path computation in time-budgeted slices so a large poll
+    // (LIRR + subway combined, ~700 trains) doesn't block the main thread.
+    // Each slice runs until ~8ms elapsed, then yields — adapts to actual
+    // turf cost (warm cache processes hundreds per slice, cold cache fewer)
+    // without ever producing a 50ms+ handler. Trains without a computed
+    // path yet animate via linear fallback — the RAF loop already handles
+    // missing entries — so animation degrades gracefully from straight-line
+    // to on-rail as slices land.
     const MIN_DIST_SQ = 0.002 * 0.002; // ~200m in degrees
-    const CHUNK_SIZE = 25;
+    const SLICE_BUDGET_MS = 8;
     const trainsToProcess = data.trains;
     const prev = prevPositions.current;
     const index = shapeIndexRef.current;
@@ -121,33 +124,46 @@ export function useTrainFeatures(
     let idleHandle: number | null = null;
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
-    const schedule = (cb: () => void) => {
+    const schedule = (cb: (deadline?: IdleDeadline) => void) => {
       if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function") {
-        idleHandle = window.requestIdleCallback(cb, { timeout: 200 });
+        idleHandle = window.requestIdleCallback((d) => cb(d), { timeout: 200 });
       } else {
-        timeoutHandle = setTimeout(cb, 0);
+        timeoutHandle = setTimeout(() => cb(), 0);
       }
     };
 
-    const processChunk = (start: number) => {
+    const processSlice = (start: number, deadline?: IdleDeadline) => {
       if (cancelled || Object.keys(index).length === 0) return;
-      const end = Math.min(start + CHUNK_SIZE, trainsToProcess.length);
-      for (let i = start; i < end; i++) {
+      const sliceStart = performance.now();
+      let i = start;
+      while (i < trainsToProcess.length) {
+        // Yield if the time budget is exhausted. Always process at least
+        // one item per slice so we make forward progress even if the
+        // deadline is already past zero on entry.
+        if (i > start) {
+          const exhausted = deadline
+            ? deadline.timeRemaining() < 1
+            : performance.now() - sliceStart > SLICE_BUDGET_MS;
+          if (exhausted) break;
+        }
         const t = trainsToProcess[i];
         const p = prev.get(t.tripId);
-        if (!p) continue;
-        const dx = t.longitude - p[0];
-        const dy = t.latitude - p[1];
-        if (dx * dx + dy * dy < MIN_DIST_SQ) continue;
-        const path = findTrackPath(index, t.routeId, p, [t.longitude, t.latitude]);
-        if (path) paths.set(t.tripId, path);
+        if (p) {
+          const dx = t.longitude - p[0];
+          const dy = t.latitude - p[1];
+          if (dx * dx + dy * dy >= MIN_DIST_SQ) {
+            const path = findTrackPath(index, t.routeId, p, [t.longitude, t.latitude]);
+            if (path) paths.set(t.tripId, path);
+          }
+        }
+        i++;
       }
-      if (end < trainsToProcess.length) {
-        schedule(() => processChunk(end));
+      if (i < trainsToProcess.length) {
+        schedule((d) => processSlice(i, d));
       }
     };
 
-    schedule(() => processChunk(0));
+    schedule((d) => processSlice(0, d));
 
     return () => {
       cancelled = true;
