@@ -1,7 +1,14 @@
 import { routeGroupsForMode } from "@panoptrain/shared";
-import type { Mode, StopsGeoJSON, TripPlan, TrainPosition } from "@panoptrain/shared";
+import type {
+  Mode,
+  StopsGeoJSON,
+  TripPlan,
+  LirrTripPlan,
+  TrainPosition,
+} from "@panoptrain/shared";
 import { LineToggle } from "./LineToggle.js";
 import { TripPlanner } from "./TripPlanner.js";
+import { LirrTripPlanner } from "./LirrTripPlanner.js";
 import { ModeTabs } from "./ModeTabs.js";
 import { StatusBadge } from "../Layout/StatusBadge.js";
 import { useIsMobile } from "../../hooks/useIsMobile.js";
@@ -21,7 +28,7 @@ interface FilterPanelProps {
   trainCount: number;
   stops: StopsGeoJSON | null;
   liveTrains: TrainPosition[];
-  onPlanFound?: (plan: TripPlan | null) => void;
+  onPlanFound?: (plan: TripPlan | LirrTripPlan | null) => void;
 }
 
 export function FilterPanel({
@@ -162,22 +169,13 @@ export function FilterPanel({
         {/* Mode tabs (PT-504) */}
         <ModeTabs mode={mode} onChange={onModeChange} />
 
-        {/* Trip planner is subway-only for now (PT-508). LIRR is schedule-based
-            with peak/off-peak fares — its own future epic. */}
+        {/* Trip planner is mode-specific — subway uses an adjacency graph
+            (frequent service, durations matter); LIRR is schedule-based
+            (sparse service, concrete next-train times matter). */}
         {mode === "subway" ? (
           <TripPlanner stops={stops} liveTrains={liveTrains} onPlanFound={onPlanFound} />
         ) : (
-          <div
-            style={{
-              padding: "12px 16px",
-              borderBottom: "1px solid rgba(255,255,255,0.08)",
-              fontSize: 11,
-              color: "#888",
-              fontStyle: "italic",
-            }}
-          >
-            Trip planning is subway-only for now. LIRR planning coming in a future release.
-          </div>
+          <LirrTripPlanner stops={stops} onPlanFound={onPlanFound} />
         )}
 
         {/* Quick actions + line groups (PT-506). routeGroupsForMode pulls
