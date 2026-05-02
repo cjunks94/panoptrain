@@ -10,8 +10,14 @@
  *   - stops.json: station locations indexed by stop_id
  *   - routes.json: route metadata
  *   - shapes.json: route polylines as GeoJSON-compatible coordinate arrays
- *   - trips.json: trip -> route/shape/direction mapping
+ *   - trips.json: trip -> route/shape/direction (+ serviceId)
  *   - stop_distances.json: pre-computed distance of each stop along its route shape
+ *
+ * LIRR-only (used by the schedule-based trip planner — subway uses an
+ * adjacency graph and doesn't need timetable data):
+ *   - stop_times.json: per-trip ordered stops with arrival/departure times
+ *   - calendar.json: service-day patterns (which days of the week run)
+ *   - calendar_dates.json: service-day exceptions (holidays, special days)
  */
 import { writeFileSync, mkdirSync } from "node:fs";
 import { parse } from "csv-parse/sync";
@@ -57,6 +63,7 @@ interface RawTrip {
   shape_id: string;
   direction_id: string;
   trip_headsign: string;
+  service_id: string;
 }
 
 interface RawStopTime {
@@ -65,6 +72,25 @@ interface RawStopTime {
   stop_sequence: string;
   arrival_time: string;
   departure_time: string;
+}
+
+interface RawCalendar {
+  service_id: string;
+  monday: string;
+  tuesday: string;
+  wednesday: string;
+  thursday: string;
+  friday: string;
+  saturday: string;
+  sunday: string;
+  start_date: string; // YYYYMMDD
+  end_date: string;
+}
+
+interface RawCalendarDate {
+  service_id: string;
+  date: string; // YYYYMMDD
+  exception_type: string; // "1" = added, "2" = removed
 }
 
 async function main() {
@@ -83,18 +109,31 @@ async function main() {
     return parse(text, { columns: true, skip_empty_lines: true }) as T[];
   };
 
+  // Optional CSVs may be absent in some GTFS feeds (e.g. calendar.txt is
+  // omitted when all services are expressed as calendar_dates exceptions).
+  const readCsvOptional = async <T>(name: string): Promise<T[]> => {
+    const file = zip.file(name);
+    if (!file) return [];
+    const text = await file.async("text");
+    return parse(text, { columns: true, skip_empty_lines: true }) as T[];
+  };
+
   // Parse all CSVs in parallel
-  const [rawStops, rawRoutes, rawShapes, rawTrips, rawStopTimes] = await Promise.all([
-    readCsv<RawStop>("stops.txt"),
-    readCsv<RawRoute>("routes.txt"),
-    readCsv<RawShape>("shapes.txt"),
-    readCsv<RawTrip>("trips.txt"),
-    readCsv<RawStopTime>("stop_times.txt"),
-  ]);
+  const [rawStops, rawRoutes, rawShapes, rawTrips, rawStopTimes, rawCalendar, rawCalendarDates] =
+    await Promise.all([
+      readCsv<RawStop>("stops.txt"),
+      readCsv<RawRoute>("routes.txt"),
+      readCsv<RawShape>("shapes.txt"),
+      readCsv<RawTrip>("trips.txt"),
+      readCsv<RawStopTime>("stop_times.txt"),
+      readCsvOptional<RawCalendar>("calendar.txt"),
+      readCsvOptional<RawCalendarDate>("calendar_dates.txt"),
+    ]);
 
   console.log(
     `Parsed: ${rawStops.length} stops, ${rawRoutes.length} routes, ` +
-      `${rawShapes.length} shape points, ${rawTrips.length} trips, ${rawStopTimes.length} stop times`,
+      `${rawShapes.length} shape points, ${rawTrips.length} trips, ${rawStopTimes.length} stop times, ` +
+      `${rawCalendar.length} calendar rows, ${rawCalendarDates.length} calendar exceptions`,
   );
 
   // Process stops — only keep stations (location_type=1 or parent stations)
@@ -143,7 +182,17 @@ async function main() {
   }
 
   // Process trips — deduplicate by keeping one representative trip per route+direction+shape
-  const trips: Record<string, { tripId: string; routeId: string; shapeId: string; directionId: number; tripHeadsign: string }> = {};
+  const trips: Record<
+    string,
+    {
+      tripId: string;
+      routeId: string;
+      shapeId: string;
+      directionId: number;
+      tripHeadsign: string;
+      serviceId: string;
+    }
+  > = {};
   const tripPatterns = new Map<string, string>(); // pattern key -> tripId (for stop_times lookup)
   for (const t of rawTrips) {
     trips[t.trip_id] = {
@@ -152,6 +201,7 @@ async function main() {
       shapeId: t.shape_id,
       directionId: parseInt(t.direction_id, 10),
       tripHeadsign: t.trip_headsign,
+      serviceId: t.service_id,
     };
     const patternKey = `${t.route_id}-${t.direction_id}-${t.shape_id}`;
     if (!tripPatterns.has(patternKey)) {
@@ -223,6 +273,55 @@ async function main() {
   write("trips.json", trips);
   write("stop_sequences.json", stopSequences);
   write("stop_distances.json", stopDistances);
+
+  // Schedule + calendar — LIRR only. The subway planner is graph-based and
+  // doesn't consume timetables; emitting them for subway would inflate the
+  // bundle by tens of MB without benefit. Re-evaluate if subway ever moves
+  // to a schedule-aware planner.
+  if (MODE === "lirr") {
+    // stop_times.json: per trip, ordered list of stops with arrival/departure
+    // times. Times are kept as raw HH:MM:SS strings (may exceed 24h, e.g.
+    // "25:30:00" for trips that depart on the prior service date and run
+    // past midnight). The planner parses these into NY-tz timestamps using
+    // the relevant service date.
+    const stopTimesByTripOut: Record<
+      string,
+      { stopId: string; stopSequence: number; arrivalTime: string; departureTime: string }[]
+    > = {};
+    for (const [tripId, times] of stopTimesByTrip) {
+      const sorted = [...times].sort(
+        (a, b) => parseInt(a.stop_sequence, 10) - parseInt(b.stop_sequence, 10),
+      );
+      stopTimesByTripOut[tripId] = sorted.map((t) => ({
+        stopId: t.stop_id,
+        stopSequence: parseInt(t.stop_sequence, 10),
+        arrivalTime: t.arrival_time,
+        departureTime: t.departure_time,
+      }));
+    }
+    write("stop_times.json", stopTimesByTripOut);
+
+    const calendar = rawCalendar.map((c) => ({
+      serviceId: c.service_id,
+      monday: c.monday === "1",
+      tuesday: c.tuesday === "1",
+      wednesday: c.wednesday === "1",
+      thursday: c.thursday === "1",
+      friday: c.friday === "1",
+      saturday: c.saturday === "1",
+      sunday: c.sunday === "1",
+      startDate: c.start_date, // YYYYMMDD
+      endDate: c.end_date,
+    }));
+    write("calendar.json", calendar);
+
+    const calendarDates = rawCalendarDates.map((d) => ({
+      serviceId: d.service_id,
+      date: d.date,
+      exceptionType: parseInt(d.exception_type, 10) as 1 | 2,
+    }));
+    write("calendar_dates.json", calendarDates);
+  }
 
   console.log("Done! Static GTFS data processed successfully.");
 }
