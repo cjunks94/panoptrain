@@ -26,9 +26,63 @@ export interface StaticGtfsData {
   stops: Record<string, GtfsStop>;
   routes: Record<string, { routeId: string; shortName: string; longName: string; color: string; textColor: string }>;
   shapes: Record<string, GtfsShape>;
-  trips: Record<string, { tripId: string; routeId: string; shapeId: string; directionId: number; tripHeadsign: string }>;
+  trips: Record<
+    string,
+    {
+      tripId: string;
+      routeId: string;
+      shapeId: string;
+      directionId: number;
+      tripHeadsign: string;
+      /** GTFS service_id — links a trip to its calendar/calendar_dates row.
+       *  Optional because the field is only emitted by newer download runs;
+       *  pre-existing subway data files predate this column. */
+      serviceId?: string;
+    }
+  >;
   stopSequences: Record<string, { stopId: string; stopSequence: number }[]>;
   stopDistances: Record<string, Record<string, number>>; // shapeId -> stopId -> km
+}
+
+/** GTFS calendar row — defines which days of the week a service runs. */
+export interface GtfsCalendarRow {
+  serviceId: string;
+  monday: boolean;
+  tuesday: boolean;
+  wednesday: boolean;
+  thursday: boolean;
+  friday: boolean;
+  saturday: boolean;
+  sunday: boolean;
+  startDate: string; // YYYYMMDD
+  endDate: string;
+}
+
+/** GTFS calendar_dates row — service additions/removals for specific dates. */
+export interface GtfsCalendarDate {
+  serviceId: string;
+  date: string; // YYYYMMDD
+  /** 1 = service added on this date, 2 = service removed. */
+  exceptionType: 1 | 2;
+}
+
+/** A single stop along a trip, with scheduled arrival/departure times. Times
+ *  are raw GTFS strings (HH:MM:SS) — HH may exceed 24 for trips that span
+ *  midnight from the prior service date. */
+export interface GtfsStopTimeRow {
+  stopId: string;
+  stopSequence: number;
+  arrivalTime: string;
+  departureTime: string;
+}
+
+/** LIRR-only schedule data, used by the schedule-based trip planner. Subway
+ *  uses an adjacency graph so this isn't loaded for it. */
+export interface LirrScheduleData {
+  /** tripId -> ordered list of stop times along that trip. */
+  stopTimes: Record<string, GtfsStopTimeRow[]>;
+  calendar: GtfsCalendarRow[];
+  calendarDates: GtfsCalendarDate[];
 }
 
 const cache: Partial<Record<Mode, StaticGtfsData>> = {};
@@ -58,4 +112,30 @@ export function loadStaticGtfs(mode: Mode = "subway"): StaticGtfsData {
 /** Reset cached static data — used by tests so each test sees a clean load. */
 export function clearStaticGtfsCache(): void {
   for (const k of Object.keys(cache) as Mode[]) delete cache[k];
+  lirrScheduleCache = null;
+}
+
+let lirrScheduleCache: LirrScheduleData | null = null;
+
+/**
+ * Load LIRR schedule data (stop_times, calendar, calendar_dates). Cached on
+ * first load. Throws with a helpful message if the files aren't present —
+ * indicates the user needs to re-run `pnpm download-gtfs:lirr` to refresh
+ * data with the schedule-aware download script.
+ */
+export function loadLirrSchedule(): LirrScheduleData {
+  if (lirrScheduleCache) return lirrScheduleCache;
+
+  console.log("Loading LIRR schedule data...");
+  const data: LirrScheduleData = {
+    stopTimes: loadJson("lirr", "stop_times.json"),
+    calendar: loadJson("lirr", "calendar.json"),
+    calendarDates: loadJson("lirr", "calendar_dates.json"),
+  };
+  console.log(
+    `  Loaded ${Object.keys(data.stopTimes).length} trip schedules, ` +
+      `${data.calendar.length} calendar rows, ${data.calendarDates.length} calendar exceptions`,
+  );
+  lirrScheduleCache = data;
+  return data;
 }

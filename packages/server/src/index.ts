@@ -11,6 +11,7 @@ import { prewarmInterpolator } from "./services/position-interpolator.js";
 import { createTrainsRouter } from "./routes/trains.js";
 import { createStaticRouter } from "./routes/static.js";
 import plan from "./routes/plan.js";
+import planLirr from "./routes/plan-lirr.js";
 
 // Load env
 const PORT = parseInt(process.env.PORT ?? "3001", 10);
@@ -46,8 +47,11 @@ app.route("/api/lirr/trains", lirrTrains);
 app.route("/api/subway", subwayStatic);
 app.route("/api/lirr", lirrStatic);
 
-// Legacy aliases — subway-only. Trip planner is subway-only by design (PT-508).
+// Legacy aliases — subway-only.
 app.route("/api/trains", subwayTrains);
+// LIRR planner mounted BEFORE the (subway) /api/plan so the more specific
+// path matches first — Hono dispatches by registration order.
+app.route("/api/plan/lirr", planLirr);
 app.route("/api/plan", plan);
 app.route("/api", subwayStatic);
 
