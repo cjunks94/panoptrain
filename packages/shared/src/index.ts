@@ -12,6 +12,10 @@ export type {
   RideSegment,
   TransferSegment,
   DelayInfo,
+  LirrTripPlan,
+  LirrPlanResponse,
+  LirrRideSegment,
+  LirrTransferSegment,
 } from "./types/api.js";
 export type {
   ParsedVehicle,

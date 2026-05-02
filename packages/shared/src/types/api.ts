@@ -121,3 +121,62 @@ export interface TransferSegment {
   atStopName: string;
   minutes: number;
 }
+
+/**
+ * Schedule-based LIRR trip plan. Unlike the subway TripPlan which only
+ * carries minute durations (subway service is frequent enough that "15 min"
+ * is more useful than "departs 6:47"), LIRR plans must carry absolute
+ * departure/arrival timestamps — the next train may be 45 minutes away.
+ */
+export interface LirrTripPlan {
+  /** Human-readable label, e.g. "6:47 → 7:23". */
+  label: string;
+  from: { stopId: string; stopName: string };
+  to: { stopId: string; stopName: string };
+  /** Boarding time at origin (epoch ms, NY-local on the wire). */
+  departAt: number;
+  /** Arrival time at destination (epoch ms). */
+  arriveAt: number;
+  /** Total minutes including transfer waits — derived but cached for the UI. */
+  totalMinutes: number;
+  transferCount: number;
+  segments: Array<LirrRideSegment | LirrTransferSegment>;
+}
+
+export interface LirrRideSegment {
+  type: "ride";
+  /** GTFS routeId (Babylon, Hempstead, etc.) — maps to LIRR_ROUTE_GROUPS. */
+  routeId: string;
+  /** GTFS tripId — useful for cross-referencing with the live train feed. */
+  tripId: string;
+  /** Headsign shown on the train (e.g. "Babylon"). */
+  tripHeadsign: string;
+  boardAt: { stopId: string; stopName: string };
+  alightAt: { stopId: string; stopName: string };
+  /** Ordered intermediate stops along the trip between board and alight,
+   *  inclusive of both endpoints. Each carries its scheduled arrival. */
+  stops: Array<{ stopId: string; stopName: string; arriveAt: number }>;
+  /** Boarding (origin) departure time, epoch ms. */
+  departAt: number;
+  /** Alighting (destination) arrival time, epoch ms. */
+  arriveAt: number;
+  /** Coordinate path along the route shape, [lon, lat]. */
+  path: [number, number][];
+}
+
+export interface LirrTransferSegment {
+  type: "transfer";
+  atStopId: string;
+  atStopName: string;
+  /** Wait time at the transfer station in minutes. */
+  minutes: number;
+}
+
+/** Response from GET /api/plan/lirr — earliest-arriving plans first. */
+export interface LirrPlanResponse {
+  /** Service date used to resolve schedule, formatted YYYY-MM-DD in NY tz.
+   *  Mostly informational — useful for clients that want to display
+   *  "Service date: Fri May 1" alongside the plan. */
+  serviceDate: string;
+  plans: LirrTripPlan[];
+}
