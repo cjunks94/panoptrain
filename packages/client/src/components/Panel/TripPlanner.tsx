@@ -280,10 +280,18 @@ function nextTrainEta(
   );
   if (here) return { text: "Next: now", color: "#22c55e" };
 
-  // Trains where boardStopId is their next stop — incoming.
-  const incoming = trains.filter((t) =>
-    t.routeId === routeId && t.nextStopId === boardStopId,
-  );
+  // Trains whose immediate next stop is the board platform. Two cases:
+  //   1) Train STOPPED_AT a prior stop and `nextStopId` points to the board
+  //      stop — the next move brings them here.
+  //   2) Train already in motion toward the board stop — its `currentStopId`
+  //      is the board stop (per GTFS-RT semantics). Without this branch the
+  //      filter would miss any train within the segment leading into the
+  //      platform, even when it's seconds away.
+  const incoming = trains.filter((t) => {
+    if (t.routeId !== routeId) return false;
+    if (t.status === "STOPPED_AT") return t.nextStopId === boardStopId;
+    return t.currentStopId === boardStopId; // IN_TRANSIT_TO or INCOMING_AT
+  });
   if (incoming.length === 0) return null;
 
   // Freshest update wins

@@ -316,21 +316,42 @@ function estimateFromTripUpdate(
 
   const distances = gtfs.stopDistances[rs.shapeId] ?? {};
 
-  // Find which two stops the train is between based on time
-  let prevStu = tu.stopTimeUpdates[0];
-  let nextStu = tu.stopTimeUpdates[0];
+  // Find which two stops the train is between based on time. Track indices
+  // so we can grab the stop *after* nextStu for the API's `nextStopId` field
+  // (the immediate-next-after-current stop).
+  //
+  // Three states per stop, in order: not-yet-arrived → dwelling → departed.
+  // Falling back arrival↔departure when one is missing handles origin stops
+  // (departure-only) and terminal stops (arrival-only) without misclassifying
+  // a dwelling train as in-transit to the following stop.
+  let prevIdx = 0;
+  let nextIdx = 0;
 
   for (let i = 0; i < tu.stopTimeUpdates.length; i++) {
     const stu = tu.stopTimeUpdates[i];
-    const arrTime = stu.arrival?.time ?? 0;
-    if (arrTime > now) {
-      nextStu = stu;
-      prevStu = i > 0 ? tu.stopTimeUpdates[i - 1] : stu;
+    const arriveTime = stu.arrival?.time ?? stu.departure?.time ?? 0;
+    const departTime = stu.departure?.time ?? stu.arrival?.time ?? 0;
+
+    if (arriveTime > now) {
+      // Train is still en route to this stop — interpolate between i-1 and i.
+      nextIdx = i;
+      prevIdx = i > 0 ? i - 1 : i;
       break;
     }
-    prevStu = stu;
-    nextStu = stu;
+    if (departTime > now) {
+      // Arrived but not yet departed — train is sitting at this stop.
+      prevIdx = i;
+      nextIdx = i;
+      break;
+    }
+    prevIdx = i;
+    nextIdx = i;
   }
+
+  const prevStu = tu.stopTimeUpdates[prevIdx];
+  const nextStu = tu.stopTimeUpdates[nextIdx];
+  const afterNextStu =
+    nextIdx < tu.stopTimeUpdates.length - 1 ? tu.stopTimeUpdates[nextIdx + 1] : null;
 
   const prevDist = distances[prevStu.stopId];
   const nextDist = distances[nextStu.stopId];
@@ -371,6 +392,8 @@ function estimateFromTripUpdate(
 
   const delay = nextStu.arrival?.delay ?? null;
 
+  const afterNextStop = afterNextStu ? gtfs.stops[afterNextStu.stopId] ?? null : null;
+
   return {
     tripId: tu.tripId,
     routeId: tu.routeId,
@@ -379,10 +402,15 @@ function estimateFromTripUpdate(
     longitude: lon,
     bearing: trainBearing,
     status: prevStu === nextStu ? "STOPPED_AT" : "IN_TRANSIT_TO",
+    // currentStop = the stop the train is at (STOPPED_AT) or heading to
+    // (IN_TRANSIT_TO), matching GTFS-RT VehiclePosition semantics and
+    // `estimateVehicle` above.
     currentStopId: nextStu.stopId,
     currentStopName: nextStop?.stopName ?? nextStu.stopId,
-    nextStopId: nextStu.stopId,
-    nextStopName: nextStop?.stopName ?? null,
+    // nextStop = the stop after currentStop in the trip sequence (or null
+    // at end-of-trip). Used by the trip planner's "incoming train" check.
+    nextStopId: afterNextStu?.stopId ?? null,
+    nextStopName: afterNextStop?.stopName ?? null,
     destination: rs.tripHeadsign,
     delay,
     updatedAt: nextStu.arrival?.time ?? now,
