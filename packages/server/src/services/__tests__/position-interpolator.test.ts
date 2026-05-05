@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { enrichWithStatic, interpolatePositions, prewarmInterpolator } from "../position-interpolator.js";
 import type { StaticGtfsData } from "../gtfs-loader.js";
-import type { ParsedVehicle } from "@panoptrain/shared";
+import type { ParsedVehicle, ParsedTripUpdate } from "@panoptrain/shared";
 
 /**
  * `enrichWithStatic` exists because the LIRR GTFS-RT protobuf leaves
@@ -174,6 +174,100 @@ describe("interpolatePositions cross-mode isolation", () => {
  * object it hasn't seen. Pre-fix, that log fires on the first poll; post-fix it
  * fires inside prewarm.
  */
+/**
+ * `estimateFromTripUpdate` runs for tripUpdates that have no matching vehicle
+ * (common during cold-start or feed flakes). Pin: `nextStopId` must be the
+ * stop *after* the current target — not a duplicate of currentStopId — so
+ * the trip planner's "incoming train" filter behaves correctly. Pre-fix the
+ * field was set to `nextStu.stopId` (same as currentStopId).
+ */
+describe("estimateFromTripUpdate next-stop semantics", () => {
+  function makeGtfs(): StaticGtfsData {
+    return {
+      stops: {
+        S1: { stopId: "S1", stopName: "Origin", lat: 40.75, lon: -73.99, parentStation: null },
+        S2: { stopId: "S2", stopName: "Mid", lat: 40.76, lon: -73.99, parentStation: null },
+        S3: { stopId: "S3", stopName: "End", lat: 40.77, lon: -73.99, parentStation: null },
+      },
+      routes: {
+        "1": { routeId: "1", shortName: "1", longName: "1", color: "000", textColor: "FFF" },
+      },
+      shapes: {
+        "sh-1": {
+          shapeId: "sh-1",
+          coordinates: [[-73.99, 40.75], [-73.99, 40.76], [-73.99, 40.77]],
+        },
+      },
+      trips: {
+        "trip-1": {
+          tripId: "trip-1",
+          routeId: "1",
+          shapeId: "sh-1",
+          directionId: 0,
+          tripHeadsign: "End",
+        },
+      },
+      stopSequences: {
+        "1-0-sh-1": [
+          { stopId: "S1", stopSequence: 1 },
+          { stopId: "S2", stopSequence: 2 },
+          { stopId: "S3", stopSequence: 3 },
+        ],
+      },
+      stopDistances: { "sh-1": { S1: 0, S2: 1.1, S3: 2.2 } },
+    };
+  }
+
+  function tripUpdate(stops: { stopId: string; arriveAt: number }[]): ParsedTripUpdate {
+    return {
+      tripId: "trip-1",
+      routeId: "1",
+      directionId: 0,
+      stopTimeUpdates: stops.map((s, i) => ({
+        stopId: s.stopId,
+        stopSequence: i + 1,
+        arrival: { time: s.arriveAt, delay: 0 },
+        departure: { time: s.arriveAt + 30, delay: 0 },
+      })),
+    };
+  }
+
+  it("nextStopId points at the stop after the current target while in transit", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const tu = tripUpdate([
+      { stopId: "S1", arriveAt: now - 120 }, // already passed
+      { stopId: "S2", arriveAt: now + 60 },  // heading here
+      { stopId: "S3", arriveAt: now + 180 }, // after S2
+    ]);
+
+    const trains = interpolatePositions([], [tu], makeGtfs());
+
+    expect(trains).toHaveLength(1);
+    const t = trains[0];
+    expect(t.status).toBe("IN_TRANSIT_TO");
+    expect(t.currentStopId).toBe("S2");
+    expect(t.nextStopId).toBe("S3");
+    expect(t.nextStopName).toBe("End");
+  });
+
+  it("nextStopId is null when the train is heading to the final stop", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const tu = tripUpdate([
+      { stopId: "S1", arriveAt: now - 240 },
+      { stopId: "S2", arriveAt: now - 120 },
+      { stopId: "S3", arriveAt: now + 60 }, // last stop, heading here
+    ]);
+
+    const trains = interpolatePositions([], [tu], makeGtfs());
+
+    expect(trains).toHaveLength(1);
+    const t = trains[0];
+    expect(t.currentStopId).toBe("S3");
+    expect(t.nextStopId).toBeNull();
+    expect(t.nextStopName).toBeNull();
+  });
+});
+
 describe("prewarmInterpolator", () => {
   function makeGtfs(): StaticGtfsData {
     return {
