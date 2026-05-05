@@ -177,7 +177,14 @@ export function LirrTripPlanner({ stops, onPlanFound }: LirrTripPlannerProps) {
         </div>
       )}
 
-      {activePlan && <LirrPlanResult plan={activePlan} />}
+      {activePlan && (
+        // Key on plan identity so LirrSegmentRow's local expanded state
+        // resets when the user switches between plans.
+        <LirrPlanResult
+          key={`${activePlan.departAt}-${activePlan.arriveAt}-${activePlan.transferCount}`}
+          plan={activePlan}
+        />
+      )}
     </div>
   );
 }
