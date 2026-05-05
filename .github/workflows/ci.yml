@@ -35,7 +35,7 @@ jobs:
           path: |
             packages/server/src/data/gtfs
             packages/server/src/data/gtfs-lirr
-          key: gtfs-static-v2-subway-lirr
+          key: gtfs-static-v3-subway-lirr-schedule
 
       - name: Download GTFS data if not cached
         if: matrix.task == 'test'
@@ -72,7 +72,7 @@ jobs:
           path: |
             packages/server/src/data/gtfs
             packages/server/src/data/gtfs-lirr
-          key: gtfs-static-v2-subway-lirr
+          key: gtfs-static-v3-subway-lirr-schedule
 
       - name: Download GTFS data if not cached
         run: |
