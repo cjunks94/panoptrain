@@ -319,15 +319,29 @@ function estimateFromTripUpdate(
   // Find which two stops the train is between based on time. Track indices
   // so we can grab the stop *after* nextStu for the API's `nextStopId` field
   // (the immediate-next-after-current stop).
+  //
+  // Three states per stop, in order: not-yet-arrived → dwelling → departed.
+  // Falling back arrival↔departure when one is missing handles origin stops
+  // (departure-only) and terminal stops (arrival-only) without misclassifying
+  // a dwelling train as in-transit to the following stop.
   let prevIdx = 0;
   let nextIdx = 0;
 
   for (let i = 0; i < tu.stopTimeUpdates.length; i++) {
     const stu = tu.stopTimeUpdates[i];
-    const arrTime = stu.arrival?.time ?? 0;
-    if (arrTime > now) {
+    const arriveTime = stu.arrival?.time ?? stu.departure?.time ?? 0;
+    const departTime = stu.departure?.time ?? stu.arrival?.time ?? 0;
+
+    if (arriveTime > now) {
+      // Train is still en route to this stop — interpolate between i-1 and i.
       nextIdx = i;
       prevIdx = i > 0 ? i - 1 : i;
+      break;
+    }
+    if (departTime > now) {
+      // Arrived but not yet departed — train is sitting at this stop.
+      prevIdx = i;
+      nextIdx = i;
       break;
     }
     prevIdx = i;

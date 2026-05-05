@@ -218,7 +218,15 @@ describe("estimateFromTripUpdate next-stop semantics", () => {
     };
   }
 
-  function tripUpdate(stops: { stopId: string; arriveAt: number }[]): ParsedTripUpdate {
+  type StuFixture = {
+    stopId: string;
+    /** Omit to test origin-style stops that carry departure only. */
+    arriveAt?: number;
+    /** Defaults to arriveAt + 30 to simulate a 30s dwell. */
+    departAt?: number;
+  };
+
+  function tripUpdate(stops: StuFixture[]): ParsedTripUpdate {
     return {
       tripId: "trip-1",
       routeId: "1",
@@ -226,8 +234,13 @@ describe("estimateFromTripUpdate next-stop semantics", () => {
       stopTimeUpdates: stops.map((s, i) => ({
         stopId: s.stopId,
         stopSequence: i + 1,
-        arrival: { time: s.arriveAt, delay: 0 },
-        departure: { time: s.arriveAt + 30, delay: 0 },
+        arrival: s.arriveAt !== undefined ? { time: s.arriveAt, delay: 0 } : null,
+        departure:
+          s.departAt !== undefined
+            ? { time: s.departAt, delay: 0 }
+            : s.arriveAt !== undefined
+              ? { time: s.arriveAt + 30, delay: 0 }
+              : null,
       })),
     };
   }
@@ -248,6 +261,47 @@ describe("estimateFromTripUpdate next-stop semantics", () => {
     expect(t.currentStopId).toBe("S2");
     expect(t.nextStopId).toBe("S3");
     expect(t.nextStopName).toBe("End");
+  });
+
+  it("treats a train mid-dwell as STOPPED_AT, not in-transit to the next stop", () => {
+    // arrival.time <= now < departure.time — train is sitting at S2 during
+    // dwell. Pre-fix, the loop only checked arrival.time and advanced past
+    // S2, classifying the train as IN_TRANSIT_TO S3.
+    const now = Math.floor(Date.now() / 1000);
+    const tu = tripUpdate([
+      { stopId: "S1", arriveAt: now - 240, departAt: now - 210 },
+      { stopId: "S2", arriveAt: now - 30, departAt: now + 30 }, // dwelling
+      { stopId: "S3", arriveAt: now + 120 },
+    ]);
+
+    const trains = interpolatePositions([], [tu], makeGtfs());
+
+    expect(trains).toHaveLength(1);
+    const t = trains[0];
+    expect(t.status).toBe("STOPPED_AT");
+    expect(t.currentStopId).toBe("S2");
+    expect(t.nextStopId).toBe("S3");
+    expect(t.nextStopName).toBe("End");
+  });
+
+  it("treats an origin departure-only stop as STOPPED_AT at the origin", () => {
+    // Origin STUs in some feeds carry only a departure time (no arrival).
+    // Pre-fix, arrival?.time ?? 0 made the loop classify the train as having
+    // already departed and skip past origin.
+    const now = Math.floor(Date.now() / 1000);
+    const tu = tripUpdate([
+      { stopId: "S1", departAt: now + 60 }, // origin, departing in 60s
+      { stopId: "S2", arriveAt: now + 180 },
+      { stopId: "S3", arriveAt: now + 300 },
+    ]);
+
+    const trains = interpolatePositions([], [tu], makeGtfs());
+
+    expect(trains).toHaveLength(1);
+    const t = trains[0];
+    expect(t.status).toBe("STOPPED_AT");
+    expect(t.currentStopId).toBe("S1");
+    expect(t.nextStopId).toBe("S2");
   });
 
   it("nextStopId is null when the train is heading to the final stop", () => {
