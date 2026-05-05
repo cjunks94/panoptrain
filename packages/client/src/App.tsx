@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from "react";
 import "maplibre-gl/dist/maplibre-gl.css";
-import type { TripPlan } from "@panoptrain/shared";
+import type { TripPlan, LirrTripPlan } from "@panoptrain/shared";
 import { AppShell } from "./components/Layout/AppShell.js";
 import { TransitMap } from "./components/Map/TransitMap.js";
 import { FilterPanel } from "./components/Panel/FilterPanel.js";
@@ -25,7 +25,11 @@ export default function App() {
     if (typeof window === "undefined") return true;
     return !window.matchMedia(MOBILE_QUERY).matches;
   });
-  const [planRoute, setPlanRoute] = useState<TripPlan | null>(null);
+  // Spotlight state accepts either subway or LIRR plans; downstream consumers
+  // (planRouteIds memo, TransitMap) only read the shared subset of fields
+  // (segments[].type, .routeId, .path), so a union is sufficient — no adapter
+  // layer needed.
+  const [planRoute, setPlanRoute] = useState<TripPlan | LirrTripPlan | null>(null);
 
   // When a plan is active, surface only the routes that plan rides — these
   // are the trains we want to spotlight on the map (PT-309).

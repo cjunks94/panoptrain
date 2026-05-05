@@ -1,7 +1,13 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import Map, { Source, Layer } from "react-map-gl/maplibre";
 import type { MapLayerMouseEvent, MapRef } from "react-map-gl/maplibre";
-import type { Mode, RoutesGeoJSON, StopsGeoJSON, TripPlan } from "@panoptrain/shared";
+import type {
+  Mode,
+  RoutesGeoJSON,
+  StopsGeoJSON,
+  TripPlan,
+  LirrTripPlan,
+} from "@panoptrain/shared";
 import { ROUTE_INFO } from "@panoptrain/shared";
 import type { TrainInfo } from "../../hooks/useTrainFeatures.js";
 import { useIsMobile } from "../../hooks/useIsMobile.js";
@@ -122,7 +128,7 @@ interface TransitMapProps {
   trains: TrainInfo[];
   routeShapes: RoutesGeoJSON | null;
   stops: StopsGeoJSON | null;
-  planRoute: TripPlan | null;
+  planRoute: TripPlan | LirrTripPlan | null;
   /** When set, hide all non-plan route lines and pulse the plan outline. */
   planRouteIds: Set<string> | null;
   /** Active transit mode. Drives auto-fit on mode switch and per-mode line
