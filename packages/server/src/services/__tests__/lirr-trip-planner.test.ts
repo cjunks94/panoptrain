@@ -136,9 +136,9 @@ describe("lirr-trip-planner", () => {
       expect(result.plans).toHaveLength(0);
     });
 
-    it("populates serviceDate with the NY-local date string", () => {
+    it("populates serviceDate as YYYY-MM-DD matching the GTFS service date used", () => {
       const result = planLirrTrips(gtfs, schedule, [PENN], [BABYLON], MONDAY_3PM_EPOCH_MS);
-      expect(result.serviceDate).toBe("20260504");
+      expect(result.serviceDate).toBe("2026-05-04");
     });
   });
 

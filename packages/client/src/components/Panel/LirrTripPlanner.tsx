@@ -67,9 +67,16 @@ export function LirrTripPlanner({ stops, onPlanFound }: LirrTripPlannerProps) {
       setActiveIdx(0);
       onPlanFound?.(result.plans[0] ?? null);
     } catch (e) {
-      // 404 ("no trips found in window") flows through as an Error.
+      // fetchJson surfaces failures as `Error("API <status>: <body>")`. Match
+      // the prefix so we can show a friendly message for 404s and avoid
+      // leaking raw backend response text for any other failure.
       const msg = e instanceof Error ? e.message : String(e);
-      setError(msg.includes("404") ? "No trains found in the next few hours" : msg);
+      console.error("LIRR trip plan failed:", e);
+      setError(
+        msg.startsWith("API 404")
+          ? "No trains found in the next few hours"
+          : "Unable to plan trip right now. Please try again.",
+      );
     } finally {
       setLoading(false);
     }
@@ -109,6 +116,7 @@ export function LirrTripPlanner({ stops, onPlanFound }: LirrTripPlannerProps) {
 
       <input
         list={fromListId}
+        aria-label="From station"
         placeholder="From station"
         value={from}
         onChange={(e) => setFrom(e.target.value)}
@@ -118,13 +126,21 @@ export function LirrTripPlanner({ stops, onPlanFound }: LirrTripPlannerProps) {
       <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
         <input
           list={toListId}
+          aria-label="To station"
           placeholder="To station"
           value={to}
           onChange={(e) => setTo(e.target.value)}
           onFocus={scrollFocusedInputIntoView}
           style={{ ...inputStyle, flex: 1 }}
         />
-        <button onClick={swap} title="Swap" style={swapBtnStyle}>⇅</button>
+        <button
+          onClick={swap}
+          title="Swap"
+          aria-label="Swap from and to stations"
+          style={swapBtnStyle}
+        >
+          ⇅
+        </button>
       </div>
 
       <div style={{ display: "flex", gap: 6 }}>

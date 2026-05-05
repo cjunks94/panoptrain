@@ -20,10 +20,18 @@ planLirr.get("/", (c) => {
     return c.json({ error: "Empty 'from' or 'to' query parameter" }, 400);
   }
 
-  // `at` accepts an ISO datetime; default to "now" when absent. The planner
-  // is timezone-aware internally — we just need an epoch ms.
+  // `at` accepts an ISO datetime; default to "now" when absent. Require an
+  // explicit timezone offset (Z or ±HH:MM) — Date.parse interprets offset-less
+  // strings as server-local time per ECMA-262, which would silently drift the
+  // resolved epoch across deploy environments.
   let departAt = Date.now();
   if (at) {
+    if (!/(?:Z|[+-]\d{2}:?\d{2})$/.test(at)) {
+      return c.json(
+        { error: "Invalid 'at' parameter — must include an explicit timezone offset (Z or ±HH:MM)" },
+        400,
+      );
+    }
     const parsed = Date.parse(at);
     if (Number.isNaN(parsed)) {
       return c.json({ error: "Invalid 'at' parameter — expected ISO 8601 datetime" }, 400);

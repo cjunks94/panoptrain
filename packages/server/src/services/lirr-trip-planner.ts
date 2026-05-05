@@ -133,6 +133,11 @@ function activeServicesOn(
   return result;
 }
 
+/** Convert a GTFS service date "YYYYMMDD" → ISO "YYYY-MM-DD". */
+function toIsoDate(yyyymmdd: string): string {
+  return `${yyyymmdd.slice(0, 4)}-${yyyymmdd.slice(4, 6)}-${yyyymmdd.slice(6, 8)}`;
+}
+
 /** Format a NY-tz local instant as "YYYYMMDD". */
 function nyDateString(epochMs: number): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -345,6 +350,14 @@ function findOneTransferTrips(
         index,
       );
 
+      // onwardCandidates are sorted by departure time, but a slightly later
+      // express can reach toStops earlier than the first local — so we have
+      // to evaluate every candidate and pick the one with the earliest arrival.
+      let bestOnward: {
+        candidate: DepartureCandidate;
+        alight: { stopId: string; arriveAt: number; sequence: number };
+      } | null = null;
+
       for (const onward of onwardCandidates) {
         if (onward.tripId === c.tripId) continue; // same trip — not a real transfer
         if (onward.departAt - transferArriveMs > transferCutoffMs) break;
@@ -365,36 +378,39 @@ function findOneTransferTrips(
         }
         if (!foundAlight) continue;
 
-        const dedupeKey = `${c.tripId}|${onward.tripId}|${st.stopId}|${c.serviceDate}|${onward.serviceDate}`;
-        if (seen.has(dedupeKey)) continue;
-        seen.add(dedupeKey);
-
-        transfers.push({
-          legA: {
-            tripId: c.tripId,
-            serviceDate: c.serviceDate,
-            fromSeq: c.fromSequence,
-            toSeq: st.stopSequence,
-            departAt: c.departAt,
-            arriveAt: transferArriveMs,
-          },
-          legB: {
-            tripId: onward.tripId,
-            serviceDate: onward.serviceDate,
-            fromSeq: onward.fromSequence,
-            toSeq: foundAlight.sequence,
-            departAt: onward.departAt,
-            arriveAt: foundAlight.arriveAt,
-          },
-          transferStopId: st.stopId,
-          transferMinutes: Math.round((onward.departAt - transferArriveMs) / 60000),
-        });
-
-        // One onward connection per transfer point is enough — the next
-        // onward train just produces a strictly later itinerary using the
-        // same legs A/B-stop combo, which is rarely useful.
-        break;
+        if (!bestOnward || foundAlight.arriveAt < bestOnward.alight.arriveAt) {
+          bestOnward = { candidate: onward, alight: foundAlight };
+        }
       }
+
+      if (!bestOnward) continue;
+
+      const onward = bestOnward.candidate;
+      const foundAlight = bestOnward.alight;
+      const dedupeKey = `${c.tripId}|${onward.tripId}|${st.stopId}|${c.serviceDate}|${onward.serviceDate}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+
+      transfers.push({
+        legA: {
+          tripId: c.tripId,
+          serviceDate: c.serviceDate,
+          fromSeq: c.fromSequence,
+          toSeq: st.stopSequence,
+          departAt: c.departAt,
+          arriveAt: transferArriveMs,
+        },
+        legB: {
+          tripId: onward.tripId,
+          serviceDate: onward.serviceDate,
+          fromSeq: onward.fromSequence,
+          toSeq: foundAlight.sequence,
+          departAt: onward.departAt,
+          arriveAt: foundAlight.arriveAt,
+        },
+        transferStopId: st.stopId,
+        transferMinutes: Math.round((onward.departAt - transferArriveMs) / 60000),
+      });
     }
   }
 
@@ -608,13 +624,15 @@ export function planLirrTrips(
 ): LirrPlannerResult {
   const fromStops = new Set(fromIds.filter((id) => gtfs.stops[id]));
   const toStops = new Set(toIds.filter((id) => gtfs.stops[id]));
-  const serviceDate = nyDateString(departAt);
+  // Fallback for empty-result paths: NY wall-clock date of the request, in
+  // documented YYYY-MM-DD form.
+  const fallbackServiceDate = toIsoDate(nyDateString(departAt));
 
   if (fromStops.size === 0 || toStops.size === 0) {
-    return { plans: [], serviceDate };
+    return { plans: [], serviceDate: fallbackServiceDate };
   }
   // Reject if from/to overlap.
-  for (const s of fromStops) if (toStops.has(s)) return { plans: [], serviceDate };
+  for (const s of fromStops) if (toStops.has(s)) return { plans: [], serviceDate: fallbackServiceDate };
 
   const index = getIndex(schedule);
   const fromName = gtfs.stops[Array.from(fromStops)[0]]?.stopName ?? "";
@@ -651,26 +669,41 @@ export function planLirrTrips(
     index,
   );
 
-  const plans: LirrTripPlan[] = [
-    ...directs.map((d) => buildDirectPlan(d, gtfs, schedule, fromName, toName)),
-    ...transfers.map((t) => buildTransferPlan(t, gtfs, schedule, fromName, toName)),
+  // Pair each plan with the GTFS service date used by its first leg so we
+  // can surface that on the response — for overnight trips this differs
+  // from the wall-clock date of `departAt`.
+  const plansWithMeta: { plan: LirrTripPlan; gtfsServiceDate: string }[] = [
+    ...directs.map((d) => ({
+      plan: buildDirectPlan(d, gtfs, schedule, fromName, toName),
+      gtfsServiceDate: d.serviceDate,
+    })),
+    ...transfers.map((t) => ({
+      plan: buildTransferPlan(t, gtfs, schedule, fromName, toName),
+      gtfsServiceDate: t.legA.serviceDate,
+    })),
   ];
 
   // Sort by arrival time, then by transfer count (prefer fewer transfers
   // when arrivals tie).
-  plans.sort((a, b) => a.arriveAt - b.arriveAt || a.transferCount - b.transferCount);
+  plansWithMeta.sort(
+    (a, b) =>
+      a.plan.arriveAt - b.plan.arriveAt || a.plan.transferCount - b.plan.transferCount,
+  );
 
   // Dedupe: drop any plan whose departAt+arriveAt match an earlier one (rare
   // but happens when a stop has multiple platform IDs that share a schedule).
   const seen = new Set<string>();
-  const deduped: LirrTripPlan[] = [];
-  for (const p of plans) {
-    const key = `${p.departAt}|${p.arriveAt}|${p.transferCount}`;
+  const deduped: typeof plansWithMeta = [];
+  for (const p of plansWithMeta) {
+    const key = `${p.plan.departAt}|${p.plan.arriveAt}|${p.plan.transferCount}`;
     if (seen.has(key)) continue;
     seen.add(key);
     deduped.push(p);
     if (deduped.length >= MAX_PLANS) break;
   }
 
-  return { plans: deduped, serviceDate };
+  const resolvedServiceDate = deduped[0]
+    ? toIsoDate(deduped[0].gtfsServiceDate)
+    : fallbackServiceDate;
+  return { plans: deduped.map((p) => p.plan), serviceDate: resolvedServiceDate };
 }
