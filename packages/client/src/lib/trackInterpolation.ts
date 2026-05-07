@@ -103,6 +103,11 @@ const scheduleIdle: (cb: () => void) => void =
     ? (cb) => { globalThis.requestIdleCallback!(cb); }
     : (cb) => { setTimeout(cb, 1); };
 
+/** Expose snap/bestShape cache sizes for diagnostics and tests. */
+export function getTrackCacheSizes(): { snap: number; bestShape: number } {
+  return { snap: snapCache.size, bestShape: bestShapeCache.size };
+}
+
 /**
  * Prime `snapCache` by walking each shape's coordinates and recording the
  * distance-along-shape for grid cells the train will actually traverse.
@@ -111,10 +116,6 @@ const scheduleIdle: (cb: () => void) => void =
  * naturally as trains repeat through the same grid cells. Bails out if the
  * cache fills so we don't displace warm entries with cold ones.
  */
-export function getTrackCacheSizes(): { snap: number; bestShape: number } {
-  return { snap: snapCache.size, bestShape: bestShapeCache.size };
-}
-
 export function prewarmTrackCaches(shapeIndex: Record<string, ShapeData[]>): void {
   const COORD_STRIDE = 5; // sample every 5th coord; finer detail fills in via live snaps
   for (const shapes of Object.values(shapeIndex)) {
