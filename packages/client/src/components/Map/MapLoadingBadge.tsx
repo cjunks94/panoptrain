@@ -18,6 +18,7 @@ export function MapLoadingBadge({ mode }: MapLoadingBadgeProps) {
   const label = mode === "lirr" ? "LIRR" : "subway";
   return (
     <div
+      role="status"
       style={{
         position: "absolute",
         top: 16,
