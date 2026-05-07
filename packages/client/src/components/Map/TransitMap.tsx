@@ -15,6 +15,7 @@ import { useViewportHeight } from "../../hooks/useViewportHeight.js";
 import { computeFitPadding } from "../../lib/mapPadding.js";
 import { popupOffsetPx } from "../../lib/popupPlacement.js";
 import { TrainPopup } from "./TrainPopup.js";
+import { MapLoadingBadge } from "./MapLoadingBadge.js";
 import type { GeoJSON } from "geojson";
 
 const BASEMAP = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
@@ -138,6 +139,9 @@ interface TransitMapProps {
    *  the visible panel: 320px on the left when open on desktop, 75vh
    *  bottom sheet on mobile. */
   panelOpen: boolean;
+  /** Routes/stops still in flight. Drives the loading badge so a cold mode
+   *  flip doesn't read as a frozen blank map. */
+  routeShapesLoading: boolean;
 }
 
 /** Popup placement constants. The popup sits perpendicular to the train's
@@ -151,7 +155,7 @@ const POPUP_OFFSET_PX = 120;
  *  position so map curvature doesn't matter. */
 const POPUP_AHEAD_DEG = 0.001;
 
-export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, stops, planRoute, planRouteIds, mode, panelOpen }: TransitMapProps) {
+export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, stops, planRoute, planRouteIds, mode, panelOpen, routeShapesLoading }: TransitMapProps) {
   const [popupTripId, setPopupTripId] = useState<string | null>(null);
   const [iconsReady, setIconsReady] = useState(false);
   const [followTripId, setFollowTripId] = useState<string | null>(null);
@@ -551,6 +555,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
 
   return (
     <>
+    {routeShapesLoading && <MapLoadingBadge mode={mode} />}
     <Map
       ref={mapRef}
       initialViewState={NYC_CENTER}
