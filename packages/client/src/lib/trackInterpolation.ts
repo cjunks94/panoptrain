@@ -98,10 +98,27 @@ export function buildShapeIndex(routes: RoutesGeoJSON): Record<string, ShapeData
   return index;
 }
 
-const scheduleIdle: (cb: () => void) => void =
-  typeof globalThis.requestIdleCallback === "function"
-    ? (cb) => { globalThis.requestIdleCallback!(cb); }
-    : (cb) => { setTimeout(cb, 1); };
+// Single-slot scheduler: a pending prewarm gets cancelled before a new one
+// is scheduled. Without this, a rebuild that fires before the previous idle
+// callback runs would let the stale callback populate snapCache with the
+// old index's distances under shapeIds the new index has reused — a real
+// poisoning hazard since shapeId resets to 0 each rebuild.
+let pendingIdleHandle: number | undefined;
+const hasIdleApi = typeof globalThis.requestIdleCallback === "function";
+
+function scheduleIdle(cb: () => void): void {
+  if (pendingIdleHandle !== undefined) {
+    if (hasIdleApi) globalThis.cancelIdleCallback!(pendingIdleHandle);
+    else clearTimeout(pendingIdleHandle);
+  }
+  const wrapped = () => {
+    pendingIdleHandle = undefined;
+    cb();
+  };
+  pendingIdleHandle = hasIdleApi
+    ? globalThis.requestIdleCallback!(wrapped)
+    : (setTimeout(wrapped, 1) as unknown as number);
+}
 
 /** Expose snap/bestShape cache sizes for diagnostics and tests. */
 export function getTrackCacheSizes(): { snap: number; bestShape: number } {

@@ -30,6 +30,7 @@ function makeRoutes(features: Array<{ routeId: string; coords: [number, number][
 // `buildShapeIndex` already routes through setTimeout. Stub setTimeout so
 // the prewarm runs synchronously inside this test.
 beforeEach(() => {
+  vi.unstubAllGlobals();
   vi.stubGlobal("setTimeout", ((fn: () => void) => {
     fn();
     return 0;
@@ -55,6 +56,49 @@ describe("prewarmTrackCaches", () => {
     expect(path).not.toBeNull();
     // Lookups for already-sampled grid cells should not grow the cache.
     expect(getTrackCacheSizes().snap).toBe(before);
+  });
+
+  it("cancels a pending prewarm when buildShapeIndex runs again before idle fires", () => {
+    // Defer setTimeout instead of running synchronously so we can simulate a
+    // rebuild while the first prewarm is still pending. Without the in-module
+    // cancellation, the first callback would run after the second
+    // buildShapeIndex's clear and poison snapCache with shapeId-0 distances
+    // from the stale index.
+    const queued: Array<{ id: number; fn: () => void }> = [];
+    let nextId = 1;
+    const cleared: number[] = [];
+    vi.stubGlobal("setTimeout", ((fn: () => void) => {
+      const id = nextId++;
+      queued.push({ id, fn });
+      return id;
+    }) as unknown as typeof setTimeout);
+    vi.stubGlobal("clearTimeout", ((id: number) => { cleared.push(id); }) as unknown as typeof clearTimeout);
+
+    const coords1: [number, number][] = Array.from({ length: 30 }, (_, i) => [-74 + i * 0.001, 40.7]);
+    buildShapeIndex(makeRoutes([{ routeId: "A", coords: coords1 }]));
+    expect(queued).toHaveLength(1);
+
+    // Mode flip / second load before the first idle fires.
+    const coords2: [number, number][] = Array.from({ length: 30 }, (_, i) => [-73 + i * 0.001, 40.8]);
+    buildShapeIndex(makeRoutes([{ routeId: "B", coords: coords2 }]));
+
+    // The first scheduled handle (id=1) must have been cancelled. The second
+    // is still pending at id=2.
+    expect(cleared).toContain(1);
+    expect(queued).toHaveLength(2);
+
+    // Fire what's still actually queued — clearTimeout in real browsers
+    // removes the callback from the queue, so the test simulator skips
+    // cancelled IDs to mirror that.
+    for (const { id, fn } of queued) {
+      if (cleared.includes(id)) continue;
+      fn();
+    }
+    // Coords1 (~lat 40.7, lon -74) and coords2 (~lat 40.8, lon -73) live in
+    // disjoint grid cells, so without cancellation we'd see entries from both
+    // prewarms (12 keys). With cancellation, only coords2's 6 samples (every
+    // 5th of 30 coords) survive.
+    expect(getTrackCacheSizes().snap).toBe(6);
   });
 
   it("tolerates degenerate shapes without throwing", () => {
