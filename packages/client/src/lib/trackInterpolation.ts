@@ -91,7 +91,42 @@ export function buildShapeIndex(routes: RoutesGeoJSON): Record<string, ShapeData
   // Clear caches when shapes change
   snapCache.clear();
   bestShapeCache.clear();
+  // Schedule a snap-cache prewarm for idle time. Without it the first poll's
+  // hundreds of trains all hit cold caches and stall the main thread on Turf
+  // nearestPointOnLine. Idle scheduling keeps it off the first-paint path.
+  scheduleIdle(() => prewarmTrackCaches(index));
   return index;
+}
+
+const scheduleIdle: (cb: () => void) => void =
+  typeof globalThis.requestIdleCallback === "function"
+    ? (cb) => { globalThis.requestIdleCallback!(cb); }
+    : (cb) => { setTimeout(cb, 1); };
+
+/**
+ * Prime `snapCache` by walking each shape's coordinates and recording the
+ * distance-along-shape for grid cells the train will actually traverse.
+ *
+ * Only seeds snap (cheap, one Turf call per sample) — bestShape warms
+ * naturally as trains repeat through the same grid cells. Bails out if the
+ * cache fills so we don't displace warm entries with cold ones.
+ */
+export function getTrackCacheSizes(): { snap: number; bestShape: number } {
+  return { snap: snapCache.size, bestShape: bestShapeCache.size };
+}
+
+export function prewarmTrackCaches(shapeIndex: Record<string, ShapeData[]>): void {
+  const COORD_STRIDE = 5; // sample every 5th coord; finer detail fills in via live snaps
+  for (const shapes of Object.values(shapeIndex)) {
+    for (const shape of shapes) {
+      const coords = shape.line.geometry.coordinates;
+      for (let i = 0; i < coords.length; i += COORD_STRIDE) {
+        const pos = coords[i] as [number, number];
+        cachedSnap(shape, pos);
+        if (snapCache.size >= MAX_CACHE_SIZE) return;
+      }
+    }
+  }
 }
 
 /**
