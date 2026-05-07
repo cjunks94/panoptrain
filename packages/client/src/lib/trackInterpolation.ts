@@ -91,7 +91,60 @@ export function buildShapeIndex(routes: RoutesGeoJSON): Record<string, ShapeData
   // Clear caches when shapes change
   snapCache.clear();
   bestShapeCache.clear();
+  // Schedule a snap-cache prewarm for idle time. Without it the first poll's
+  // hundreds of trains all hit cold caches and stall the main thread on Turf
+  // nearestPointOnLine. Idle scheduling keeps it off the first-paint path.
+  scheduleIdle(() => prewarmTrackCaches(index));
   return index;
+}
+
+// Single-slot scheduler: a pending prewarm gets cancelled before a new one
+// is scheduled. Without this, a rebuild that fires before the previous idle
+// callback runs would let the stale callback populate snapCache with the
+// old index's distances under shapeIds the new index has reused — a real
+// poisoning hazard since shapeId resets to 0 each rebuild.
+let pendingIdleHandle: number | undefined;
+const hasIdleApi = typeof globalThis.requestIdleCallback === "function";
+
+function scheduleIdle(cb: () => void): void {
+  if (pendingIdleHandle !== undefined) {
+    if (hasIdleApi) globalThis.cancelIdleCallback!(pendingIdleHandle);
+    else clearTimeout(pendingIdleHandle);
+  }
+  const wrapped = () => {
+    pendingIdleHandle = undefined;
+    cb();
+  };
+  pendingIdleHandle = hasIdleApi
+    ? globalThis.requestIdleCallback!(wrapped)
+    : (setTimeout(wrapped, 1) as unknown as number);
+}
+
+/** Expose snap/bestShape cache sizes for diagnostics and tests. */
+export function getTrackCacheSizes(): { snap: number; bestShape: number } {
+  return { snap: snapCache.size, bestShape: bestShapeCache.size };
+}
+
+/**
+ * Prime `snapCache` by walking each shape's coordinates and recording the
+ * distance-along-shape for grid cells the train will actually traverse.
+ *
+ * Only seeds snap (cheap, one Turf call per sample) — bestShape warms
+ * naturally as trains repeat through the same grid cells. Bails out if the
+ * cache fills so we don't displace warm entries with cold ones.
+ */
+export function prewarmTrackCaches(shapeIndex: Record<string, ShapeData[]>): void {
+  const COORD_STRIDE = 5; // sample every 5th coord; finer detail fills in via live snaps
+  for (const shapes of Object.values(shapeIndex)) {
+    for (const shape of shapes) {
+      const coords = shape.line.geometry.coordinates;
+      for (let i = 0; i < coords.length; i += COORD_STRIDE) {
+        const pos = coords[i] as [number, number];
+        cachedSnap(shape, pos);
+        if (snapCache.size >= MAX_CACHE_SIZE) return;
+      }
+    }
+  }
 }
 
 /**

@@ -47,13 +47,20 @@ export function useRouteShapes(mode: Mode): UseRouteShapesResult {
 
 const MAX_LABEL_ROUTES = 6;
 
+// Defends against React StrictMode double-effects and rapid mode flips
+// handing back the same payload — without it, ~127 LIRR features re-do the
+// label string ops on every call.
+const enrichCache = new WeakMap<StopsGeoJSON, StopsGeoJSON>();
+
 /** Augment each stop feature with derived properties consumed by map layer
  *  expressions: numeric `routeCount` for hub sizing/filtering, and a
  *  preformatted `labelText` ("Times Sq-42 St · 1 2 3 N Q R W") for the
  *  detailed label layer. Doing this once at load avoids reasoning about
  *  array operations inside MapLibre expressions. */
 function enrichStops(stops: StopsGeoJSON): StopsGeoJSON {
-  return {
+  const cached = enrichCache.get(stops);
+  if (cached) return cached;
+  const enriched: StopsGeoJSON = {
     ...stops,
     features: stops.features.map((f) => {
       const routes = f.properties.routes ?? [];
@@ -72,4 +79,6 @@ function enrichStops(stops: StopsGeoJSON): StopsGeoJSON {
       };
     }),
   };
+  enrichCache.set(stops, enriched);
+  return enriched;
 }
