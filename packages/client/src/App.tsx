@@ -9,6 +9,8 @@ import { useTrainFeatures } from "./hooks/useTrainFeatures.js";
 import { useRouteShapes } from "./hooks/useRouteShapes.js";
 import { useLineFilter } from "./hooks/useLineFilter.js";
 import { useMode } from "./hooks/useMode.js";
+import { useAircraftPositions } from "./hooks/useAircraftPositions.js";
+import { useAirspaceToggle } from "./hooks/useAirspaceToggle.js";
 import { MOBILE_QUERY } from "./hooks/useIsMobile.js";
 
 export default function App() {
@@ -16,6 +18,10 @@ export default function App() {
   const { data, isStale, lastUpdated } = useTrainPositions(mode);
   const { routeShapes, stopsGeoJson, loading: routeShapesLoading } = useRouteShapes(mode);
   const { visibleRoutes, toggleRoute, toggleGroup, allOn, allOff } = useLineFilter(mode);
+  // Airspace overlay is independent of subway/LIRR mode — same aircraft
+  // appear regardless of which transit mode the user is viewing.
+  const [airspaceEnabled, setAirspaceEnabled] = useAirspaceToggle();
+  const { aircraft } = useAircraftPositions(airspaceEnabled);
   // Default closed on mobile so the bottom sheet doesn't take up 75vh on
   // first paint — users land on the map, then tap to filter. Desktop keeps
   // the sidebar open by default since it doesn't cover the map. One-shot
@@ -61,6 +67,7 @@ export default function App() {
         mode={mode}
         panelOpen={panelOpen}
         routeShapesLoading={routeShapesLoading}
+        aircraft={aircraft}
       />
       <FilterPanel
         open={panelOpen}
@@ -78,6 +85,9 @@ export default function App() {
         stops={stopsGeoJson}
         liveTrains={data?.trains ?? []}
         onPlanFound={setPlanRoute}
+        airspaceEnabled={airspaceEnabled}
+        onToggleAirspace={setAirspaceEnabled}
+        aircraftCount={aircraft.length}
       />
     </AppShell>
   );

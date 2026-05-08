@@ -5,6 +5,7 @@ import type {
   StopsGeoJSON,
   PlanResponse,
   LirrPlanResponse,
+  AirspaceResponse,
 } from "@panoptrain/shared";
 
 async function fetchJson<T>(path: string): Promise<T> {
@@ -48,4 +49,10 @@ export function fetchLirrPlan(
   const to = encodeURIComponent(toIds.join(","));
   const atParam = at ? `&at=${encodeURIComponent(at.toISOString())}` : "";
   return fetchJson<LirrPlanResponse>(`/plan/lirr?from=${from}&to=${to}${atParam}`);
+}
+
+/** Live aircraft within ~40 nm of NYC. Server polls adsb.lol on its own
+ *  cadence; the client just consumes the latest snapshot. */
+export function fetchAirspaceAircraft(): Promise<AirspaceResponse> {
+  return fetchJson<AirspaceResponse>("/airspace/aircraft");
 }

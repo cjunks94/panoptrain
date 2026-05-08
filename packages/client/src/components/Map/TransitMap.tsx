@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import Map, { Source, Layer } from "react-map-gl/maplibre";
 import type { MapLayerMouseEvent, MapRef } from "react-map-gl/maplibre";
 import type {
+  Aircraft,
   Mode,
   RoutesGeoJSON,
   StopsGeoJSON,
@@ -14,8 +15,10 @@ import { useIsMobile } from "../../hooks/useIsMobile.js";
 import { useViewportHeight } from "../../hooks/useViewportHeight.js";
 import { computeFitPadding } from "../../lib/mapPadding.js";
 import { popupOffsetPx } from "../../lib/popupPlacement.js";
+import { aircraftKind } from "../../lib/aircraftFormat.js";
 import { TrainPopup } from "./TrainPopup.js";
 import { MapLoadingBadge } from "./MapLoadingBadge.js";
+import { AircraftPopup } from "./AircraftPopup.js";
 import type { GeoJSON } from "geojson";
 
 const BASEMAP = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
@@ -52,6 +55,33 @@ function createSquareIcon(size: number): ImageData {
   ctx.beginPath();
   ctx.roundRect(pad, pad, size - pad * 2, size - pad * 2, corner);
   ctx.fillStyle = "#fff";
+  ctx.fill();
+  return ctx.getImageData(0, 0, size, size);
+}
+
+/** Generate a delta-shaped plane silhouette as SDF ImageData. Drawn
+ *  pointing up (north) so MapLibre's icon-rotate maps directly from the
+ *  aircraft's true track in degrees. */
+function createPlaneIcon(size: number): ImageData {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+  const cx = size / 2;
+  const cy = size / 2;
+  ctx.fillStyle = "#fff";
+  ctx.beginPath();
+  // Nose, then sweep down and outward along each wing leading edge,
+  // tuck back to the rear notch, and close — gives a fighter/glider look
+  // that reads as a plane rather than a generic triangle at small sizes.
+  ctx.moveTo(cx, cy - size * 0.42);              // nose
+  ctx.lineTo(cx + size * 0.34, cy + size * 0.30); // right wingtip
+  ctx.lineTo(cx + size * 0.08, cy + size * 0.18); // right inner trailing edge
+  ctx.lineTo(cx + size * 0.08, cy + size * 0.42); // right tail
+  ctx.lineTo(cx - size * 0.08, cy + size * 0.42); // left tail
+  ctx.lineTo(cx - size * 0.08, cy + size * 0.18); // left inner trailing edge
+  ctx.lineTo(cx - size * 0.34, cy + size * 0.30); // left wingtip
+  ctx.closePath();
   ctx.fill();
   return ctx.getImageData(0, 0, size, size);
 }
@@ -142,6 +172,10 @@ interface TransitMapProps {
   /** Routes/stops still in flight. Drives the loading badge so a cold mode
    *  flip doesn't read as a frozen blank map. */
   routeShapesLoading: boolean;
+  /** Live aircraft to render on the airspace overlay. Empty array when the
+   *  overlay is toggled off, so the layer can mount unconditionally and
+   *  the only branch is data presence. */
+  aircraft: Aircraft[];
 }
 
 /** Popup placement constants. The popup sits perpendicular to the train's
@@ -155,10 +189,11 @@ const POPUP_OFFSET_PX = 120;
  *  position so map curvature doesn't matter. */
 const POPUP_AHEAD_DEG = 0.001;
 
-export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, stops, planRoute, planRouteIds, mode, panelOpen, routeShapesLoading }: TransitMapProps) {
+export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, stops, planRoute, planRouteIds, mode, panelOpen, routeShapesLoading, aircraft }: TransitMapProps) {
   const [popupTripId, setPopupTripId] = useState<string | null>(null);
   const [iconsReady, setIconsReady] = useState(false);
   const [followTripId, setFollowTripId] = useState<string | null>(null);
+  const [popupAircraftHex, setPopupAircraftHex] = useState<string | null>(null);
   const mapRef = useRef<MapRef>(null);
   const popupOverlayRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
@@ -298,6 +333,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     const size = 48;
     map.addImage("marker-circle", createCircleIcon(size), { sdf: true });
     map.addImage("marker-square", createSquareIcon(size), { sdf: true });
+    map.addImage("marker-plane", createPlaneIcon(size), { sdf: true });
     setIconsReady(true);
   }, []);
 
@@ -310,9 +346,13 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
   useEffect(() => {
     const map = mapRef.current?.getMap();
     if (!map) return;
-    for (const id of ["train-glow", "train-rim", "train-markers", "train-carets"]) {
+    for (const id of ["aircraft-markers", "train-glow", "train-rim", "train-markers", "train-carets"]) {
       if (map.getLayer(id)) map.moveLayer(id);
     }
+    // Aircraft layer ordering is stable once mounted — only the geometry
+    // changes per poll, not the layer ID — so we don't add aircraftGeoJson
+    // to the dep array. Re-promoting on data changes would still be correct
+    // but would churn each 8s poll for no visible benefit.
   }, [routeShapes, stops, planRoute, iconsReady]);
 
   // Auto-fit the viewport to the active mode's network on mode switch (PT-507).
@@ -521,6 +561,18 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
       const feature = e.features?.[0];
       if (!feature || !feature.properties) {
         setPopupTripId(null);
+        setPopupAircraftHex(null);
+        return;
+      }
+      // Layer dispatch — aircraft markers and train markers share the same
+      // click event but live in different layers.
+      const layerId = feature.layer?.id;
+      if (layerId === "aircraft-markers") {
+        const hex = feature.properties.hex as string | undefined;
+        if (hex) {
+          setPopupAircraftHex(hex);
+          setPopupTripId(null);
+        }
         return;
       }
       const tripId = feature.properties.tripId as string | undefined;
@@ -533,10 +585,31 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
       // has aged out via the 5min TTL filter between paint and click.
       if (trains.some((t) => t.tripId === tripId)) {
         setPopupTripId(tripId);
+        setPopupAircraftHex(null);
       }
     },
     [trains],
   );
+
+  // Build the aircraft GeoJSON. Recomputed only when the aircraft array
+  // identity changes, which happens on each successful poll — not per
+  // RAF frame, so it's fine to live in a useMemo.
+  const aircraftGeoJson = useMemo<GeoJSON.FeatureCollection>(() => {
+    return {
+      type: "FeatureCollection",
+      features: aircraft.map((a) => ({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [a.longitude, a.latitude] },
+        properties: {
+          hex: a.hex,
+          // 0 reads as "north" to MapLibre; null tracks land planes
+          // pointing north which is fine for parked / non-broadcasting.
+          track: a.track ?? 0,
+          kind: aircraftKind(a.category),
+        },
+      })),
+    };
+  }, [aircraft]);
 
   // Look up the active popup's train data once per render. Reading from
   // `trains` (state) is fine here because popup CONTENT only changes on
@@ -547,11 +620,24 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     [popupTripId, trains],
   );
 
+  // Same lookup for the active aircraft popup. Aircraft are keyed by hex,
+  // which is stable across polls (it's the airframe's ICAO 24-bit address).
+  const popupAircraft = useMemo(
+    () => (popupAircraftHex ? aircraft.find((a) => a.hex === popupAircraftHex) ?? null : null),
+    [popupAircraftHex, aircraft],
+  );
+
   // If the popup's train falls out of the snapshot (TTL eviction, mode flip,
   // route filter), close the popup so it doesn't keep tracking a ghost.
   useEffect(() => {
     if (popupTripId && !popupTrain) setPopupTripId(null);
   }, [popupTripId, popupTrain]);
+
+  // Same for aircraft: if the plane leaves the bbox or the overlay is
+  // toggled off, close any open popup.
+  useEffect(() => {
+    if (popupAircraftHex && !popupAircraft) setPopupAircraftHex(null);
+  }, [popupAircraftHex, popupAircraft]);
 
   return (
     <>
@@ -561,7 +647,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
       initialViewState={NYC_CENTER}
       style={{ width: "100%", height: "100%" }}
       mapStyle={BASEMAP}
-      interactiveLayerIds={["train-markers"]}
+      interactiveLayerIds={["train-markers", "aircraft-markers"]}
       onClick={handleClick}
       onLoad={handleMapLoad}
       cursor="pointer"
@@ -823,6 +909,45 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
         </Source>
       )}
 
+      {/* Aircraft (airspace overlay). Empty FeatureCollection when the
+          overlay is toggled off so we don't conditionally mount the layer
+          and pay the addLayer/removeLayer churn on each toggle. The
+          re-promote effect ordering keeps this layer below train markers
+          so trains stay legible on top during the most common view
+          (zoomed in on Manhattan). */}
+      {iconsReady && (
+        <Source id="aircraft" type="geojson" data={aircraftGeoJson}>
+          <Layer
+            id="aircraft-markers"
+            type="symbol"
+            layout={{
+              "icon-image": "marker-plane",
+              "icon-size": [
+                "interpolate", ["linear"], ["zoom"],
+                9, 0.35,
+                14, 0.55,
+              ],
+              "icon-rotate": ["get", "track"],
+              "icon-rotation-alignment": "map",
+              "icon-allow-overlap": true,
+              "icon-ignore-placement": true,
+            }}
+            paint={{
+              "icon-color": [
+                "match",
+                ["get", "kind"],
+                "helicopter", "#fb923c", // orange — visually distinct from jet
+                "fixed-wing", "#fef08a", // pale yellow — readable on dark basemap
+                "#cbd5e1",                // slate — unknown / surface
+              ],
+              "icon-opacity": 0.9,
+              "icon-halo-color": "#0a0a1a",
+              "icon-halo-width": 1,
+            }}
+          />
+        </Source>
+      )}
+
       {/* Train markers — data pushed by RAF loop via source.setData(). The
           source is declared last so its layers render on top of routes,
           stops, and plan highlights. */}
@@ -936,6 +1061,17 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
           }}
         />
       </Source>
+
+      {/* Aircraft popup uses react-map-gl's Popup which auto-positions
+          relative to the given lng/lat — much simpler than the train
+          popup's per-frame DOM dance, and aircraft don't need follow
+          mode or sub-poll motion smoothing anyway. */}
+      {popupAircraft && (
+        <AircraftPopup
+          aircraft={popupAircraft}
+          onClose={() => setPopupAircraftHex(null)}
+        />
+      )}
 
     </Map>
     {/* Popup is a sibling of <Map>, not a child — it's a custom HTML
