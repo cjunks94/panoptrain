@@ -13,8 +13,14 @@ const SNAP_DURATION_MS = 1500;
 // transponder cycles, brief ground-station gaps). Don't yank the marker
 // off the map on a single missed poll. Keep dead-reckoning at full opacity
 // for the grace window, then fade over FADE_DURATION_MS, then unmount.
-const FADE_GRACE_MS = 1000;
-const FADE_DURATION_MS = 5000;
+//
+// Grace > poll interval so a single missed poll bridges at full opacity
+// without ever dimming. Two missed polls fade smoothly; three drop. Set
+// shorter than this and the carried-forward marker is fully gone before
+// the next poll could revive it — exactly the flicker the fade was
+// meant to prevent. (POLL_INTERVAL is 8s in useAircraftPositions.)
+const FADE_GRACE_MS = 12_000;
+const FADE_DURATION_MS = 8_000;
 const FADE_TOTAL_MS = FADE_GRACE_MS + FADE_DURATION_MS;
 
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
@@ -138,13 +144,16 @@ export function useAircraftFeatures(aircraft: Aircraft[]) {
       const reused = featuresByHex.current.get(hex);
       const f: AircraftFeature = reused ?? {
         type: "Feature",
+        // opacity seeded only on first creation. Reused features keep
+        // whatever interpolateFrame last wrote — otherwise carried-forward
+        // mid-fade aircraft would pop to 1 for one frame on every poll
+        // arrival and immediately drop back, producing visible flicker.
         properties: { hex, track: 0, kind: "fixed-wing", opacity: 1 },
         geometry: { type: "Point", coordinates: [entry.prev.pos[0], entry.prev.pos[1]] },
       };
       f.properties.hex = hex;
       f.properties.track = entry.truth.track;
       f.properties.kind = aircraftKind(entry.data.category);
-      f.properties.opacity = 1;
       features.push(f);
       nextByHex.set(hex, f);
     }
