@@ -162,9 +162,9 @@ interface TransitMapProps {
   planRoute: TripPlan | LirrTripPlan | null;
   /** When set, hide all non-plan route lines and pulse the plan outline. */
   planRouteIds: Set<string> | null;
-  /** Active transit mode. Drives auto-fit on mode switch and per-mode line
-   *  styling. */
-  mode: Mode;
+  /** Active transit mode. Null when on the airspace view — transit layers
+   *  (trains, routes, stops, plan highlight) are skipped entirely. */
+  mode: Mode | null;
   /** Whether the filter panel is open. Auto-fit padding compensates for
    *  the visible panel: 320px on the left when open on desktop, 75vh
    *  bottom sheet on mobile. */
@@ -372,6 +372,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
   const lastFitMode = useRef<Mode | null>(null);
   useEffect(() => {
     if (!routeShapes || routeShapes.features.length === 0) return;
+    if (mode === null) return; // airspace view handles its own fit below
     if (lastFitMode.current === null) {
       // First time we have routes — record this as the seed mode and let
       // initialViewState own the camera.
@@ -400,6 +401,27 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     lastFitMode.current = mode;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mode + fitPadding intentionally excluded; only routeShapes drives fit
   }, [routeShapes]);
+
+  // Auto-fit the airspace view to a fixed NYC-metro bbox roughly matching
+  // the server-side 40 nm aircraft pull. Without this, switching to
+  // airspace from a deep zoom on a single station leaves the user staring
+  // at empty asphalt with no planes in frame. Only fires on the
+  // transition INTO airspace; staying on airspace doesn't refit.
+  const lastWasAirspace = useRef(false);
+  useEffect(() => {
+    const isAirspaceNow = mode === null;
+    if (isAirspaceNow && !lastWasAirspace.current) {
+      const map = mapRef.current?.getMap();
+      if (map) {
+        map.fitBounds(
+          [[-74.5, 40.2], [-73.4, 41.1]],
+          { padding: fitPadding, duration: 800, maxZoom: 11 },
+        );
+      }
+    }
+    lastWasAirspace.current = isAirspaceNow;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mode is the only relevant trigger; fitPadding read at fit time
+  }, [mode]);
 
   // Auto-fit the viewport to the planned route so users immediately see the
   // whole trip — fixes the case where one segment goes off-screen (e.g. an
@@ -641,7 +663,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
 
   return (
     <>
-    {routeShapesLoading && <MapLoadingBadge mode={mode} />}
+    {routeShapesLoading && mode !== null && <MapLoadingBadge mode={mode} />}
     <Map
       ref={mapRef}
       initialViewState={NYC_CENTER}
@@ -950,7 +972,9 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
 
       {/* Train markers — data pushed by RAF loop via source.setData(). The
           source is declared last so its layers render on top of routes,
-          stops, and plan highlights. */}
+          stops, and plan highlights. Mounted only when a transit mode is
+          active so the airspace view doesn't carry train-layer overhead. */}
+      {mode !== null && (
       <Source id="trains" type="geojson" data={geojsonRef.current}>
         {/* Soft outer glow */}
         <Layer
@@ -1061,6 +1085,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
           }}
         />
       </Source>
+      )}
 
       {/* Aircraft popup uses react-map-gl's Popup which auto-positions
           relative to the given lng/lat — much simpler than the train

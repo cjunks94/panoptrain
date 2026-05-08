@@ -1,17 +1,19 @@
-import type { Mode } from "@panoptrain/shared";
+import type { View } from "../../hooks/useView.js";
 
 interface ModeTabsProps {
-  mode: Mode;
-  onChange: (next: Mode) => void;
+  view: View;
+  onChange: (next: View) => void;
 }
 
-const TABS: { key: Mode; label: string }[] = [
+const TABS: { key: View; label: string }[] = [
   { key: "subway", label: "Subway" },
   { key: "lirr", label: "LIRR" },
+  { key: "airspace", label: "Airspace" },
 ];
 
-/** Top-of-panel tab strip switching between subway and LIRR (PT-504). */
-export function ModeTabs({ mode, onChange }: ModeTabsProps) {
+/** Top-of-panel tab strip switching between subway, LIRR, and airspace.
+ *  Mutually exclusive: only one view's data is loaded at a time. */
+export function ModeTabs({ view, onChange }: ModeTabsProps) {
   return (
     <div
       role="tablist"
@@ -23,7 +25,7 @@ export function ModeTabs({ mode, onChange }: ModeTabsProps) {
       }}
     >
       {TABS.map((t) => {
-        const active = t.key === mode;
+        const active = t.key === view;
         return (
           <button
             key={t.key}

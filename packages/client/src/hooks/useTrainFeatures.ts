@@ -55,7 +55,7 @@ export function useTrainFeatures(
   visibleRoutes: Set<string>,
   routeShapes: RoutesGeoJSON | null,
   planRouteIds: Set<string> | null,
-  mode: Mode,
+  mode: Mode | null,
 ) {
   const geojsonRef = useRef(EMPTY_FC);
   const prevPositions = useRef(new Map<string, [number, number]>());
@@ -174,10 +174,13 @@ export function useTrainFeatures(
     };
   }, [data]);
 
-  // Rebuild features when data or visibleRoutes change
+  // Rebuild features when data or visibleRoutes change. `mode === null`
+  // means the user is on the airspace view; data is always null in that
+  // case (useTrainPositions clears it on mode flip), so this guard is
+  // defensive — TypeScript can't see the runtime invariant.
   useEffect(() => {
     const d = lastDataRef.current;
-    if (!d) return;
+    if (!d || mode === null) return;
 
     // When a plan is active it *overrides* the line filter — show only the
     // routes the plan rides, regardless of which lines the user has toggled

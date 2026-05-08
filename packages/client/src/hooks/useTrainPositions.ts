@@ -14,7 +14,7 @@ interface UseTrainPositionsResult {
   error: Error | null;
 }
 
-export function useTrainPositions(mode: Mode): UseTrainPositionsResult {
+export function useTrainPositions(mode: Mode | null): UseTrainPositionsResult {
   const [data, setData] = useState<TrainsResponse | null>(null);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [isStale, setIsStale] = useState(false);
@@ -24,10 +24,11 @@ export function useTrainPositions(mode: Mode): UseTrainPositionsResult {
   // happening between fetch start and resolve, and discard its response.
   // Without this, switching Subway → LIRR while a /api/subway/trains request
   // is mid-flight would briefly flash subway trains in the LIRR view.
-  const modeRef = useRef(mode);
+  const modeRef = useRef<Mode | null>(mode);
 
-  // Clear stale data when the mode flips so we don't briefly show subway
-  // trains while the LIRR fetch is in flight, and update modeRef.
+  // Clear stale data when the mode flips (or unloads, e.g. switching to
+  // the airspace view) so we don't briefly show old trains while the new
+  // mode's fetch is in flight.
   useEffect(() => {
     modeRef.current = mode;
     setData(null);
@@ -37,6 +38,7 @@ export function useTrainPositions(mode: Mode): UseTrainPositionsResult {
 
   const poll = useCallback(async () => {
     const requested = mode;
+    if (requested === null) return;
     try {
       const result = await fetchTrains(requested);
       if (modeRef.current !== requested) return; // mode flipped mid-flight
@@ -66,6 +68,7 @@ export function useTrainPositions(mode: Mode): UseTrainPositionsResult {
   // multiple times just clears and restarts the interval.
   useEffect(() => {
     const start = () => {
+      if (mode === null) return; // airspace view — no trains to poll
       if (intervalRef.current) clearInterval(intervalRef.current);
       poll();
       intervalRef.current = setInterval(poll, POLL_INTERVAL);
@@ -76,6 +79,14 @@ export function useTrainPositions(mode: Mode): UseTrainPositionsResult {
         intervalRef.current = null;
       }
     };
+
+    if (mode === null) {
+      // View switched to airspace — stop any running interval and bail
+      // before subscribing to visibility events since there's nothing to
+      // resume. Train state was already cleared by the mode-change effect.
+      stop();
+      return stop;
+    }
 
     const isHidden = typeof document !== "undefined" && document.visibilityState === "hidden";
     if (isHidden) stop();
