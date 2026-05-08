@@ -45,5 +45,8 @@ export {
 } from "./constants/feeds.js";
 export type { Mode } from "./constants/feeds.js";
 
+export type { Aircraft, AirspaceResponse } from "./types/airspace.js";
+
 // Schemas
 export { TrainPositionSchema, TrainsResponseSchema } from "./schemas/api.schema.js";
+export { AircraftSchema, AirspaceResponseSchema } from "./schemas/airspace.schema.js";

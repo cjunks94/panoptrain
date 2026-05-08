@@ -7,15 +7,23 @@ import { join, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadStaticGtfs } from "./services/gtfs-loader.js";
 import { startPolling } from "./services/mta-poller.js";
+import { startAirspacePolling } from "./services/airspace-poller.js";
 import { prewarmInterpolator } from "./services/position-interpolator.js";
 import { createTrainsRouter } from "./routes/trains.js";
 import { createStaticRouter } from "./routes/static.js";
 import plan from "./routes/plan.js";
 import planLirr from "./routes/plan-lirr.js";
+import airspace from "./routes/airspace.js";
 
 // Load env
 const PORT = parseInt(process.env.PORT ?? "3001", 10);
 const POLL_INTERVAL = parseInt(process.env.POLL_INTERVAL_MS ?? "30000", 10);
+// Airspace overlay is gated so we can dark-launch / disable in environments
+// where outbound HTTPS to adsb.lol isn't available (sealed CI, offline dev).
+// Default on — the route returns 503 cleanly if the poller can't reach the
+// upstream, so the worst case is "no aircraft yet" rather than a crash.
+const AIRSPACE_ENABLED = (process.env.AIRSPACE_ENABLED ?? "true") !== "false";
+const AIRSPACE_POLL_INTERVAL = parseInt(process.env.AIRSPACE_POLL_INTERVAL_MS ?? "8000", 10);
 
 const app = new Hono();
 
@@ -53,6 +61,7 @@ app.route("/api/trains", subwayTrains);
 // path matches first — Hono dispatches by registration order.
 app.route("/api/plan/lirr", planLirr);
 app.route("/api/plan", plan);
+app.route("/api/airspace", airspace);
 app.route("/api", subwayStatic);
 
 // In production, serve the built client files
@@ -103,6 +112,12 @@ try {
   startPolling("lirr", lirrGtfs, POLL_INTERVAL);
 } catch (err) {
   console.warn("LIRR GTFS data not available — skipping. Run \"pnpm download-gtfs lirr\" to enable LIRR.");
+}
+
+if (AIRSPACE_ENABLED) {
+  startAirspacePolling(AIRSPACE_POLL_INTERVAL);
+} else {
+  console.log("Airspace polling disabled via AIRSPACE_ENABLED=false");
 }
 
 console.log(`Panoptrain server starting on port ${PORT}...`);
