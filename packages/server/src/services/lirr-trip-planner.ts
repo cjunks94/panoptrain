@@ -13,7 +13,7 @@ const MAX_PLANS = 3;
  * stop. Transfer expansion uses a tighter window since work is multiplied by
  * the number of intermediate stops.
  */
-const DIRECT_LOOKAHEAD_HOURS = 6;
+export const DIRECT_LOOKAHEAD_HOURS = 6;
 const TRANSFER_LOOKAHEAD_HOURS = 4;
 
 interface StopDeparture {
