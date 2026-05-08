@@ -14,7 +14,7 @@ import { MOBILE_QUERY } from "./hooks/useIsMobile.js";
 export default function App() {
   const [mode, setMode] = useMode();
   const { data, isStale, lastUpdated } = useTrainPositions(mode);
-  const { routeShapes, stopsGeoJson } = useRouteShapes(mode);
+  const { routeShapes, stopsGeoJson, loading: routeShapesLoading } = useRouteShapes(mode);
   const { visibleRoutes, toggleRoute, toggleGroup, allOn, allOff } = useLineFilter(mode);
   // Default closed on mobile so the bottom sheet doesn't take up 75vh on
   // first paint — users land on the map, then tap to filter. Desktop keeps
@@ -60,6 +60,7 @@ export default function App() {
         planRouteIds={planRouteIds}
         mode={mode}
         panelOpen={panelOpen}
+        routeShapesLoading={routeShapesLoading}
       />
       <FilterPanel
         open={panelOpen}
