@@ -1,4 +1,4 @@
-import { useState, useMemo, useId } from "react";
+import { useState, useMemo, useId, useEffect } from "react";
 import type { FocusEvent } from "react";
 import type {
   StopsGeoJSON,
@@ -8,6 +8,7 @@ import type {
 } from "@panoptrain/shared";
 import { fetchLirrPlan } from "../../lib/api.js";
 import { getRouteInfo } from "../../lib/colors.js";
+import { localStringToEtDate, tomorrow8amET } from "../../lib/etTime.js";
 
 /** Mirror the iOS-Safari workaround in the subway TripPlanner — without this
  *  the on-screen keyboard covers the focused input on the bottom sheet. */
@@ -16,20 +17,96 @@ function scrollFocusedInputIntoView(e: FocusEvent<HTMLInputElement>) {
   setTimeout(() => target.scrollIntoView({ block: "center", behavior: "smooth" }), 250);
 }
 
+type TimePreset = "now" | "+15" | "+30" | "+1h" | "tom8am" | "custom";
+
+const PRESET_LABELS: Record<TimePreset, string> = {
+  now: "Now",
+  "+15": "+15",
+  "+30": "+30",
+  "+1h": "+1h",
+  tom8am: "Tom 8am",
+  custom: "Pick…",
+};
+
+const LAST_TRIP_KEY = "panoptrain:lirr:lastTrip";
+
+interface PersistedTrip {
+  from: string;
+  to: string;
+}
+
+function loadLastTrip(): PersistedTrip | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(LAST_TRIP_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.from !== "string" || typeof parsed?.to !== "string") return null;
+    return { from: parsed.from, to: parsed.to };
+  } catch {
+    // localStorage can throw under privacy modes / quota — fail open.
+    return null;
+  }
+}
+
+function saveLastTrip(trip: PersistedTrip): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(LAST_TRIP_KEY, JSON.stringify(trip));
+  } catch {
+    // ignore — persistence is a nice-to-have, not load-bearing
+  }
+}
+
+/**
+ * Resolve the active time preset to a concrete Date passed to fetchLirrPlan,
+ * or `undefined` when the user just wants "now" (server default). Computed
+ * at call time so "+15" always means "15 minutes from when the user clicks
+ * Find", not from when they picked the chip.
+ */
+function resolveDepartAt(preset: TimePreset, customLocal: string): Date | undefined {
+  switch (preset) {
+    case "now":
+      return undefined;
+    case "+15":
+      return new Date(Date.now() + 15 * 60_000);
+    case "+30":
+      return new Date(Date.now() + 30 * 60_000);
+    case "+1h":
+      return new Date(Date.now() + 60 * 60_000);
+    case "tom8am":
+      return tomorrow8amET();
+    case "custom":
+      return customLocal ? localStringToEtDate(customLocal) : undefined;
+  }
+}
+
 interface LirrTripPlannerProps {
   stops: StopsGeoJSON | null;
   onPlanFound?: (plan: LirrTripPlan | null) => void;
 }
 
 export function LirrTripPlanner({ stops, onPlanFound }: LirrTripPlannerProps) {
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  const initialTrip = useMemo(loadLastTrip, []);
+  const [from, setFrom] = useState(initialTrip?.from ?? "");
+  const [to, setTo] = useState(initialTrip?.to ?? "");
   const [plans, setPlans] = useState<LirrTripPlan[]>([]);
   const [activeIdx, setActiveIdx] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [timePreset, setTimePreset] = useState<TimePreset>("now");
+  const [customLocal, setCustomLocal] = useState<string>("");
   const fromListId = useId();
   const toListId = useId();
+  const customInputId = useId();
+
+  // Persist from/to whenever they form a valid round-trip pair, regardless of
+  // whether the user has clicked Find. This keeps the inputs sticky across
+  // refreshes without requiring a successful API call (which the server
+  // sometimes refuses during cold-start when LIRR data isn't loaded yet).
+  useEffect(() => {
+    if (from && to && from !== to) saveLastTrip({ from, to });
+  }, [from, to]);
 
   // LIRR has 1:1 station-to-stop mapping (no NYC-style multi-platform parents),
   // so the label-to-IDs map is simpler than the subway equivalent — each
@@ -60,9 +137,21 @@ export function LirrTripPlanner({ stops, onPlanFound }: LirrTripPlannerProps) {
       setError("Pick two different stations");
       return;
     }
+    let departAt: Date | undefined;
+    try {
+      departAt = resolveDepartAt(timePreset, customLocal);
+    } catch {
+      setError("Pick a valid date/time");
+      return;
+    }
+    if (timePreset === "custom" && !customLocal) {
+      setError("Pick a date/time or choose a preset");
+      return;
+    }
+
     setLoading(true);
     try {
-      const result = await fetchLirrPlan(fromIds, toIds);
+      const result = await fetchLirrPlan(fromIds, toIds, departAt);
       setPlans(result.plans);
       setActiveIdx(0);
       onPlanFound?.(result.plans[0] ?? null);
@@ -72,11 +161,13 @@ export function LirrTripPlanner({ stops, onPlanFound }: LirrTripPlannerProps) {
       // leaking raw backend response text for any other failure.
       const msg = e instanceof Error ? e.message : String(e);
       console.error("LIRR trip plan failed:", e);
-      setError(
-        msg.startsWith("API 404")
-          ? "No trains found in the next few hours"
-          : "Unable to plan trip right now. Please try again.",
-      );
+      if (msg.startsWith("API 404")) {
+        setError("No trains in the next 6 hours — try a later time");
+      } else if (msg.startsWith("API 400")) {
+        setError("That time is too far ahead — pick something within the next week");
+      } else {
+        setError("Unable to plan trip right now. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
@@ -142,6 +233,37 @@ export function LirrTripPlanner({ stops, onPlanFound }: LirrTripPlannerProps) {
           ⇅
         </button>
       </div>
+
+      <div style={{ marginTop: 10, fontSize: 11, fontWeight: 600, color: "#888", letterSpacing: 0.5 }}>
+        WHEN
+      </div>
+      <div style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
+        {(Object.keys(PRESET_LABELS) as TimePreset[]).map((p) => (
+          <button
+            key={p}
+            onClick={() => setTimePreset(p)}
+            aria-pressed={timePreset === p}
+            style={{
+              ...presetChipStyle,
+              background: timePreset === p ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.04)",
+              borderColor: timePreset === p ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.08)",
+              color: timePreset === p ? "#fff" : "#aaa",
+            }}
+          >
+            {PRESET_LABELS[p]}
+          </button>
+        ))}
+      </div>
+      {timePreset === "custom" && (
+        <input
+          id={customInputId}
+          type="datetime-local"
+          aria-label="Departure date and time (Eastern Time)"
+          value={customLocal}
+          onChange={(e) => setCustomLocal(e.target.value)}
+          style={{ ...inputStyle, marginTop: 6 }}
+        />
+      )}
 
       <div style={{ display: "flex", gap: 6 }}>
         <button onClick={handlePlan} disabled={loading} style={{ ...findBtnStyle, flex: 1 }}>
@@ -362,6 +484,17 @@ const clearBtnStyle: React.CSSProperties = {
 };
 
 const tabBtnStyle: React.CSSProperties = {
+  minHeight: 32,
+  padding: "6px 10px",
+  border: "1px solid",
+  borderRadius: 14,
+  fontSize: 11,
+  fontWeight: 500,
+  fontFamily: "inherit",
+  cursor: "pointer",
+};
+
+const presetChipStyle: React.CSSProperties = {
   minHeight: 32,
   padding: "6px 10px",
   border: "1px solid",
