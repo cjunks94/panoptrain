@@ -369,7 +369,12 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
   // routeShapes itself actually changes (after the reset, then again when
   // the new mode's data arrives), and the closure picks up the matching
   // mode at that moment.
-  const lastFitMode = useRef<Mode | null>(null);
+  // Tracks the last mode the map auto-fit to. The "airspace" sentinel is
+  // written when the user enters the airspace view so that LIRR→Airspace
+  // →LIRR (and the Subway equivalent) still counts as a mode change and
+  // re-fits to the transit bbox — without it, the ref would still equal
+  // the returning mode and the map would stay on the airspace bbox.
+  const lastFitMode = useRef<Mode | "airspace" | null>(null);
   useEffect(() => {
     if (!routeShapes || routeShapes.features.length === 0) return;
     if (mode === null) return; // airspace view handles its own fit below
@@ -411,6 +416,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
   useEffect(() => {
     const isAirspaceNow = mode === null;
     if (isAirspaceNow && !lastWasAirspace.current) {
+      lastFitMode.current = "airspace";
       const map = mapRef.current?.getMap();
       if (map) {
         map.fitBounds(
