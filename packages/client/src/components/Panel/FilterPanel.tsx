@@ -29,6 +29,10 @@ interface FilterPanelProps {
   stops: StopsGeoJSON | null;
   liveTrains: TrainPosition[];
   onPlanFound?: (plan: TripPlan | LirrTripPlan | null) => void;
+  /** Airspace overlay (live aircraft) — independent of subway/LIRR mode. */
+  airspaceEnabled: boolean;
+  onToggleAirspace: (next: boolean) => void;
+  aircraftCount: number;
 }
 
 export function FilterPanel({
@@ -45,6 +49,9 @@ export function FilterPanel({
   stops,
   liveTrains,
   onPlanFound,
+  airspaceEnabled,
+  onToggleAirspace,
+  aircraftCount,
 }: FilterPanelProps) {
   const isMobile = useIsMobile();
 
@@ -211,6 +218,55 @@ export function FilterPanel({
               />
             );
           })}
+        </div>
+
+        {/* Overlays (airspace) live BELOW the route groups so the primary
+            transit toggles stay above the fold on smaller screens. The
+            attribution footer immediately under the airspace row is
+            required by adsb.lol's ODbL license. */}
+        <div
+          style={{
+            borderTop: "1px solid rgba(255,255,255,0.08)",
+            padding: "8px 16px",
+          }}
+        >
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              minHeight: 36,
+              cursor: "pointer",
+              fontSize: 13,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={airspaceEnabled}
+              onChange={(e) => onToggleAirspace(e.target.checked)}
+              style={{ width: 16, height: 16, cursor: "pointer" }}
+            />
+            <span style={{ color: "#e2e8f0", flex: 1 }}>Aircraft</span>
+            {airspaceEnabled && (
+              <span style={{ color: "#94a3b8", fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
+                {aircraftCount}
+              </span>
+            )}
+          </label>
+          {airspaceEnabled && (
+            <div style={{ fontSize: 10, color: "#64748b", marginTop: 4, lineHeight: 1.4 }}>
+              Aircraft data:{" "}
+              <a
+                href="https://adsb.lol"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: "#94a3b8", textDecoration: "underline" }}
+              >
+                adsb.lol
+              </a>
+              {" "}(ODbL)
+            </div>
+          )}
         </div>
       </div>
     </>
