@@ -679,7 +679,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
           LIRR rails render slightly thicker than subway to match the
           commuter-rail convention and because LIRR's much-larger geographic
           spread means each line renders at lower screen-space density. */}
-      {allShapes && (
+      {mode !== null && allShapes && (
         <Source id="routes" type="geojson" data={allShapes}>
           <Layer
             id="route-lines"
@@ -701,7 +701,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
           (driven by the RAF effect above). The colored line is bumped to
           width 6 and uses a line-cap of "round" so adjacent segments meet
           cleanly through transfer points. */}
-      {planGeoJson && (
+      {mode !== null && planGeoJson && (
         <Source id="plan-route" type="geojson" data={planGeoJson}>
           {/* Wide soft white glow underneath — visible even when the route's
               own color is low-contrast against the dark map (e.g. L grey). */}
@@ -742,7 +742,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
       )}
 
       {/* Stations */}
-      {stops && (
+      {mode !== null && stops && (
         <Source id="stops" type="geojson" data={stops}>
           {/* Station markers — radius scales with serving-route count so
               major hubs stand out. Every dot gets a dark halo so the white
@@ -890,7 +890,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
       {/* Plan key stations — pulsing halo + solid center on the start, end,
           and any transfer points along the active plan. Pulse params live
           in the RAF effect above. */}
-      {planStopsGeoJson && (
+      {mode !== null && planStopsGeoJson && (
         <Source id="plan-stops" type="geojson" data={planStopsGeoJson}>
           <Layer
             id="plan-stops-glow"

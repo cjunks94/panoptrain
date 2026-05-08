@@ -174,13 +174,23 @@ export function useTrainFeatures(
     };
   }, [data]);
 
-  // Rebuild features when data or visibleRoutes change. `mode === null`
-  // means the user is on the airspace view; data is always null in that
-  // case (useTrainPositions clears it on mode flip), so this guard is
-  // defensive — TypeScript can't see the runtime invariant.
+  // Rebuild features when data or visibleRoutes change. When `data` is
+  // cleared on a mode flip (Subway↔LIRR↔Airspace), reset every cached
+  // ref/state so this effect can't rebuild a stale snapshot from
+  // lastDataRef.current and leave ghost trains, popups, or follow targets
+  // alive until the next poll.
   useEffect(() => {
-    const d = lastDataRef.current;
-    if (!d || mode === null) return;
+    if (data === null || mode === null) {
+      lastDataRef.current = null;
+      prevPositions.current = new Map();
+      currPositions.current = new Map();
+      trackPaths.current = new Map();
+      geojsonRef.current = EMPTY_FC;
+      lastRenderedFraction.current = -1;
+      setTrains([]);
+      return;
+    }
+    const d = data;
 
     // When a plan is active it *overrides* the line filter — show only the
     // routes the plan rides, regardless of which lines the user has toggled
