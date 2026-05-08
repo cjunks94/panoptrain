@@ -9,7 +9,7 @@ import type {
   TripPlan,
   LirrTripPlan,
 } from "@panoptrain/shared";
-import { ROUTE_INFO } from "@panoptrain/shared";
+import { ROUTE_INFO, AIRPORTS } from "@panoptrain/shared";
 import type { TrainInfo } from "../../hooks/useTrainFeatures.js";
 import { useAircraftFeatures } from "../../hooks/useAircraftFeatures.js";
 import { useIsMobile } from "../../hooks/useIsMobile.js";
@@ -23,6 +23,24 @@ import type { GeoJSON } from "geojson";
 
 const BASEMAP = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 const NYC_CENTER = { longitude: -73.98, latitude: 40.75, zoom: 12 };
+
+// Airport GeoJSON is constant — built once at module load. Mirrors the
+// shape that station-dots / station-labels-* expressions read from on the
+// transit modes, so the layer expressions below reuse the same `importance`
+// case-by-bucket pattern.
+const AIRPORTS_GEOJSON: GeoJSON.FeatureCollection = {
+  type: "FeatureCollection",
+  features: AIRPORTS.map((a) => ({
+    type: "Feature",
+    geometry: { type: "Point", coordinates: [a.longitude, a.latitude] },
+    properties: {
+      iata: a.iata,
+      icao: a.icao,
+      name: a.name,
+      importance: a.importance,
+    },
+  })),
+};
 // 30fps. Higher than the previous 15fps because the dirty-flag guard in
 // interpolateFrame means we no longer pay the per-frame setData() cost
 // during the idle gap between polls — only during the ~30s of active
@@ -933,6 +951,121 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
                 "transfer", "#cbd5e1",
                 "#0a0a1a",
               ],
+            }}
+          />
+        </Source>
+      )}
+
+      {/* Airports — the airspace equivalent of transit stations. Mirrors
+          the importance-bucket pattern (2=hubs JFK/LGA/EWR, 1=major
+          secondaries, 0=regional GA): hubs visible earliest, regional only
+          labeled at high zoom. Bigger dots than transit stations because
+          there are far fewer of them. `beforeId` keeps the layers below
+          aircraft so planes stay legible on top regardless of which mounts
+          first. */}
+      {mode === null && (
+        <Source id="airports" type="geojson" data={AIRPORTS_GEOJSON}>
+          <Layer
+            id="airport-dots"
+            beforeId="aircraft-markers"
+            type="circle"
+            paint={{
+              "circle-radius": [
+                "interpolate", ["linear"], ["zoom"],
+                9, [
+                  "case",
+                  ["==", ["get", "importance"], 2], 6,
+                  ["==", ["get", "importance"], 1], 4,
+                  3,
+                ],
+                12, [
+                  "case",
+                  ["==", ["get", "importance"], 2], 9,
+                  ["==", ["get", "importance"], 1], 6,
+                  4,
+                ],
+                14, [
+                  "case",
+                  ["==", ["get", "importance"], 2], 12,
+                  ["==", ["get", "importance"], 1], 8,
+                  5,
+                ],
+              ],
+              "circle-color": "#ffffff",
+              "circle-opacity": 0.95,
+              "circle-stroke-width": [
+                "case",
+                ["==", ["get", "importance"], 2], 2.5,
+                ["==", ["get", "importance"], 1], 2,
+                1.5,
+              ],
+              // Hubs get a bright halo to read as "premium"; secondaries
+              // and regional fields get the dark halo that punches the
+              // white core out against colored aircraft / dark basemap.
+              "circle-stroke-color": [
+                "case",
+                ["==", ["get", "importance"], 2], "#ffffff",
+                "#0a0a1a",
+              ],
+              "circle-stroke-opacity": 1,
+            }}
+          />
+          {/* Code-only labels at low zoom — IATA is universal, fits in a
+              tight footprint, and is what most users recognize. Filter
+              importance >= 1 so the regional GA fields don't clutter the
+              wide airspace view (default zoom 11). */}
+          <Layer
+            id="airport-labels-code"
+            beforeId="aircraft-markers"
+            type="symbol"
+            maxzoom={13}
+            filter={[">=", ["get", "importance"], 1]}
+            layout={{
+              "text-field": ["get", "iata"],
+              "text-size": [
+                "interpolate", ["linear"], ["zoom"],
+                9, 10,
+                12, 13,
+              ],
+              "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+              "text-offset": [0, 1.2],
+              "text-anchor": "top",
+              "text-optional": true,
+              "symbol-sort-key": ["-", 0, ["get", "importance"]],
+            }}
+            paint={{
+              "text-color": "#e2e8f0",
+              "text-halo-color": "#0a0a1a",
+              "text-halo-width": 2,
+            }}
+          />
+          {/* Detailed labels at zoom 13+ — every airport gets full name
+              ("JFK · John F. Kennedy"). Sort key prefers hubs in collision
+              contests so a regional field never wins a layout fight against
+              a major hub at marginal zooms. */}
+          <Layer
+            id="airport-labels-detail"
+            beforeId="aircraft-markers"
+            type="symbol"
+            minzoom={13}
+            layout={{
+              "text-field": ["concat", ["get", "iata"], " · ", ["get", "name"]],
+              "text-size": [
+                "interpolate", ["linear"], ["zoom"],
+                13, 11,
+                16, 13,
+              ],
+              "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+              "text-offset": [0, 1.4],
+              "text-anchor": "top",
+              "text-max-width": 12,
+              "text-optional": true,
+              "symbol-sort-key": ["-", 0, ["get", "importance"]],
+            }}
+            paint={{
+              "text-color": "#e2e8f0",
+              "text-halo-color": "#0a0a1a",
+              "text-halo-width": 2,
             }}
           />
         </Source>
