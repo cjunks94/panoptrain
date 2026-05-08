@@ -8,7 +8,7 @@ interface UseRouteShapesResult {
   loading: boolean;
 }
 
-export function useRouteShapes(mode: Mode): UseRouteShapesResult {
+export function useRouteShapes(mode: Mode | null): UseRouteShapesResult {
   const [routeShapes, setRouteShapes] = useState<RoutesGeoJSON | null>(null);
   const [stopsGeoJson, setStopsGeoJson] = useState<StopsGeoJSON | null>(null);
 
@@ -16,9 +16,12 @@ export function useRouteShapes(mode: Mode): UseRouteShapesResult {
     let cancelled = false;
 
     // Reset state on mode flip so we don't show subway shapes briefly while
-    // LIRR data is still loading.
+    // LIRR data is still loading. Same reset path covers the airspace flip
+    // (mode === null) since transit shapes have no place there either.
     setRouteShapes(null);
     setStopsGeoJson(null);
+
+    if (mode === null) return; // airspace view — no shapes/stops to fetch
 
     // Fetch stops and routes independently so each renders as soon as it's
     // ready (PT-104). The routes GeoJSON is multi-MB; previously Promise.all
@@ -41,7 +44,8 @@ export function useRouteShapes(mode: Mode): UseRouteShapesResult {
   // pending". With the parallel-fetch pattern a single useState flag would
   // either lie (flips early when one fetch finishes) or hang forever (waits
   // only for one). Consumers can also gate on the individual values directly.
-  const loading = routeShapes === null || stopsGeoJson === null;
+  // On airspace there's nothing to load, so loading is always false there.
+  const loading = mode !== null && (routeShapes === null || stopsGeoJson === null);
   return { routeShapes, stopsGeoJson, loading };
 }
 

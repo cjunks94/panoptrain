@@ -1,6 +1,6 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import "maplibre-gl/dist/maplibre-gl.css";
-import type { TripPlan, LirrTripPlan } from "@panoptrain/shared";
+import type { TripPlan, LirrTripPlan, Mode } from "@panoptrain/shared";
 import { AppShell } from "./components/Layout/AppShell.js";
 import { TransitMap } from "./components/Map/TransitMap.js";
 import { FilterPanel } from "./components/Panel/FilterPanel.js";
@@ -8,20 +8,28 @@ import { useTrainPositions } from "./hooks/useTrainPositions.js";
 import { useTrainFeatures } from "./hooks/useTrainFeatures.js";
 import { useRouteShapes } from "./hooks/useRouteShapes.js";
 import { useLineFilter } from "./hooks/useLineFilter.js";
-import { useMode } from "./hooks/useMode.js";
+import { useView, transitModeFor } from "./hooks/useView.js";
 import { useAircraftPositions } from "./hooks/useAircraftPositions.js";
-import { useAirspaceToggle } from "./hooks/useAirspaceToggle.js";
 import { MOBILE_QUERY } from "./hooks/useIsMobile.js";
 
 export default function App() {
-  const [mode, setMode] = useMode();
-  const { data, isStale, lastUpdated } = useTrainPositions(mode);
-  const { routeShapes, stopsGeoJson, loading: routeShapesLoading } = useRouteShapes(mode);
-  const { visibleRoutes, toggleRoute, toggleGroup, allOn, allOff } = useLineFilter(mode);
-  // Airspace overlay is independent of subway/LIRR mode — same aircraft
-  // appear regardless of which transit mode the user is viewing.
-  const [airspaceEnabled, setAirspaceEnabled] = useAirspaceToggle();
-  const { aircraft } = useAircraftPositions(airspaceEnabled);
+  const [view, setView] = useView();
+  const transitMode = transitModeFor(view);
+  // useLineFilter holds per-mode local state (no fetching). It needs *some*
+  // Mode at all times even on the airspace view, since hooks can't be
+  // skipped. Track the last transit mode the user was on and feed that
+  // through; on airspace the line-filter UI is hidden anyway, so this is
+  // just keeping the state object intact for the next subway/LIRR visit.
+  const lastTransitModeRef = useRef<Mode>(transitMode ?? "subway");
+  useEffect(() => {
+    if (transitMode !== null) lastTransitModeRef.current = transitMode;
+  }, [transitMode]);
+  const lineFilterMode = transitMode ?? lastTransitModeRef.current;
+
+  const { data, isStale, lastUpdated } = useTrainPositions(transitMode);
+  const { routeShapes, stopsGeoJson, loading: routeShapesLoading } = useRouteShapes(transitMode);
+  const { visibleRoutes, toggleRoute, toggleGroup, allOn, allOff } = useLineFilter(lineFilterMode);
+  const { aircraft } = useAircraftPositions(view === "airspace");
   // Default closed on mobile so the bottom sheet doesn't take up 75vh on
   // first paint — users land on the map, then tap to filter. Desktop keeps
   // the sidebar open by default since it doesn't cover the map. One-shot
@@ -37,6 +45,13 @@ export default function App() {
   // layer needed.
   const [planRoute, setPlanRoute] = useState<TripPlan | LirrTripPlan | null>(null);
 
+  // Clear any active plan when the user switches off the transit view that
+  // produced it — a subway plan is meaningless on LIRR, and neither plan is
+  // meaningful on airspace.
+  useEffect(() => {
+    setPlanRoute(null);
+  }, [transitMode]);
+
   // When a plan is active, surface only the routes that plan rides — these
   // are the trains we want to spotlight on the map (PT-309).
   const planRouteIds = useMemo<Set<string> | null>(() => {
@@ -49,7 +64,7 @@ export default function App() {
   }, [planRoute]);
 
   const { geojsonRef, interpolateFrame, trains } = useTrainFeatures(
-    data, visibleRoutes, routeShapes, planRouteIds, mode,
+    data, visibleRoutes, routeShapes, planRouteIds, transitMode,
   );
 
   const togglePanel = useCallback(() => setPanelOpen((p) => !p), []);
@@ -64,7 +79,7 @@ export default function App() {
         stops={stopsGeoJson}
         planRoute={planRoute}
         planRouteIds={planRouteIds}
-        mode={mode}
+        mode={transitMode}
         panelOpen={panelOpen}
         routeShapesLoading={routeShapesLoading}
         aircraft={aircraft}
@@ -72,8 +87,9 @@ export default function App() {
       <FilterPanel
         open={panelOpen}
         onToggle={togglePanel}
-        mode={mode}
-        onModeChange={setMode}
+        view={view}
+        transitMode={transitMode}
+        onViewChange={setView}
         visibleRoutes={visibleRoutes}
         onToggleRoute={toggleRoute}
         onToggleGroup={toggleGroup}
@@ -85,8 +101,6 @@ export default function App() {
         stops={stopsGeoJson}
         liveTrains={data?.trains ?? []}
         onPlanFound={setPlanRoute}
-        airspaceEnabled={airspaceEnabled}
-        onToggleAirspace={setAirspaceEnabled}
         aircraftCount={aircraft.length}
       />
     </AppShell>

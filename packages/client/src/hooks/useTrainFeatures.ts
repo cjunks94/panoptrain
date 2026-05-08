@@ -55,7 +55,7 @@ export function useTrainFeatures(
   visibleRoutes: Set<string>,
   routeShapes: RoutesGeoJSON | null,
   planRouteIds: Set<string> | null,
-  mode: Mode,
+  mode: Mode | null,
 ) {
   const geojsonRef = useRef(EMPTY_FC);
   const prevPositions = useRef(new Map<string, [number, number]>());
@@ -174,10 +174,23 @@ export function useTrainFeatures(
     };
   }, [data]);
 
-  // Rebuild features when data or visibleRoutes change
+  // Rebuild features when data or visibleRoutes change. When `data` is
+  // cleared on a mode flip (Subway↔LIRR↔Airspace), reset every cached
+  // ref/state so this effect can't rebuild a stale snapshot from
+  // lastDataRef.current and leave ghost trains, popups, or follow targets
+  // alive until the next poll.
   useEffect(() => {
-    const d = lastDataRef.current;
-    if (!d) return;
+    if (data === null || mode === null) {
+      lastDataRef.current = null;
+      prevPositions.current = new Map();
+      currPositions.current = new Map();
+      trackPaths.current = new Map();
+      geojsonRef.current = EMPTY_FC;
+      lastRenderedFraction.current = -1;
+      setTrains([]);
+      return;
+    }
+    const d = data;
 
     // When a plan is active it *overrides* the line filter — show only the
     // routes the plan rides, regardless of which lines the user has toggled

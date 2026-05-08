@@ -12,12 +12,17 @@ import { LirrTripPlanner } from "./LirrTripPlanner.js";
 import { ModeTabs } from "./ModeTabs.js";
 import { StatusBadge } from "../Layout/StatusBadge.js";
 import { useIsMobile } from "../../hooks/useIsMobile.js";
+import type { View } from "../../hooks/useView.js";
 
 interface FilterPanelProps {
   open: boolean;
   onToggle: () => void;
-  mode: Mode;
-  onModeChange: (next: Mode) => void;
+  view: View;
+  /** The current transit mode if `view` is subway or LIRR; null when on
+   *  airspace. Mode-specific subsections (line filters, trip planner)
+   *  consume this directly so they don't need to recompute the narrowing. */
+  transitMode: Mode | null;
+  onViewChange: (next: View) => void;
   visibleRoutes: Set<string>;
   onToggleRoute: (routeId: string) => void;
   onToggleGroup: (groupLabel: string) => void;
@@ -29,17 +34,16 @@ interface FilterPanelProps {
   stops: StopsGeoJSON | null;
   liveTrains: TrainPosition[];
   onPlanFound?: (plan: TripPlan | LirrTripPlan | null) => void;
-  /** Airspace overlay (live aircraft) — independent of subway/LIRR mode. */
-  airspaceEnabled: boolean;
-  onToggleAirspace: (next: boolean) => void;
+  /** Aircraft snapshot count — surfaced as the airspace view's status. */
   aircraftCount: number;
 }
 
 export function FilterPanel({
   open,
   onToggle,
-  mode,
-  onModeChange,
+  view,
+  transitMode,
+  onViewChange,
   visibleRoutes,
   onToggleGroup,
   onAllOn,
@@ -49,11 +53,10 @@ export function FilterPanel({
   stops,
   liveTrains,
   onPlanFound,
-  airspaceEnabled,
-  onToggleAirspace,
   aircraftCount,
 }: FilterPanelProps) {
   const isMobile = useIsMobile();
+  const isAirspace = view === "airspace";
 
   // Below 768px the panel becomes a bottom sheet (full width × 75vh) so the
   // map keeps its full horizontal footprint instead of being squeezed by a
@@ -133,7 +136,7 @@ export function FilterPanel({
     <>
       {!open && (
         <button onClick={onToggle} style={toggleStyle}>
-          Filter Lines
+          {isAirspace ? "Airspace" : "Filter Lines"}
         </button>
       )}
 
@@ -169,107 +172,131 @@ export function FilterPanel({
             </button>
           </div>
           <div style={{ marginTop: 8 }}>
-            <StatusBadge isStale={isStale} trainCount={trainCount} />
+            {isAirspace ? (
+              <AirspaceStatusBadge count={aircraftCount} />
+            ) : (
+              <StatusBadge isStale={isStale} trainCount={trainCount} />
+            )}
           </div>
         </div>
 
-        {/* Mode tabs (PT-504) */}
-        <ModeTabs mode={mode} onChange={onModeChange} />
+        {/* View tabs */}
+        <ModeTabs view={view} onChange={onViewChange} />
 
-        {/* Trip planner is mode-specific — subway uses an adjacency graph
-            (frequent service, durations matter); LIRR is schedule-based
-            (sparse service, concrete next-train times matter). */}
-        {mode === "subway" ? (
-          <TripPlanner stops={stops} liveTrains={liveTrains} onPlanFound={onPlanFound} />
-        ) : (
-          <LirrTripPlanner stops={stops} onPlanFound={onPlanFound} />
-        )}
-
-        {/* Quick actions + line groups (PT-506). routeGroupsForMode pulls
-            either ROUTE_GROUPS (subway) or LIRR_ROUTE_GROUPS (LIRR). */}
-        <div
-          style={{
-            padding: "8px 16px",
-            display: "flex",
-            gap: 8,
-            borderBottom: "1px solid rgba(255,255,255,0.08)",
-          }}
-        >
-          <button onClick={onAllOn} style={quickBtnStyle}>
-            All On
-          </button>
-          <button onClick={onAllOff} style={quickBtnStyle}>
-            All Off
-          </button>
-        </div>
-
-        <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
-          {routeGroupsForMode(mode).map((group) => {
-            const allVisible = group.routes.every((r) => visibleRoutes.has(r));
-            const someVisible = group.routes.some((r) => visibleRoutes.has(r));
-            return (
-              <LineToggle
-                key={group.label}
-                label={group.label}
-                color={group.color}
-                active={allVisible}
-                partial={someVisible && !allVisible}
-                onToggle={() => onToggleGroup(group.label)}
-              />
-            );
-          })}
-        </div>
-
-        {/* Overlays (airspace) live BELOW the route groups so the primary
-            transit toggles stay above the fold on smaller screens. The
-            attribution footer immediately under the airspace row is
-            required by adsb.lol's ODbL license. */}
-        <div
-          style={{
-            borderTop: "1px solid rgba(255,255,255,0.08)",
-            padding: "8px 16px",
-          }}
-        >
-          <label
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              minHeight: 36,
-              cursor: "pointer",
-              fontSize: 13,
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={airspaceEnabled}
-              onChange={(e) => onToggleAirspace(e.target.checked)}
-              style={{ width: 16, height: 16, cursor: "pointer" }}
-            />
-            <span style={{ color: "#e2e8f0", flex: 1 }}>Aircraft</span>
-            {airspaceEnabled && (
-              <span style={{ color: "#94a3b8", fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
-                {aircraftCount}
-              </span>
+        {/* Transit-mode-specific UI (trip planner, route groups, line filter)
+            is hidden on the airspace view since none of it applies. */}
+        {transitMode !== null ? (
+          <>
+            {transitMode === "subway" ? (
+              <TripPlanner stops={stops} liveTrains={liveTrains} onPlanFound={onPlanFound} />
+            ) : (
+              <LirrTripPlanner stops={stops} onPlanFound={onPlanFound} />
             )}
-          </label>
-          {airspaceEnabled && (
-            <div style={{ fontSize: 10, color: "#64748b", marginTop: 4, lineHeight: 1.4 }}>
-              Aircraft data:{" "}
-              <a
-                href="https://adsb.lol"
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ color: "#94a3b8", textDecoration: "underline" }}
-              >
-                adsb.lol
-              </a>
-              {" "}(ODbL)
+
+            <div
+              style={{
+                padding: "8px 16px",
+                display: "flex",
+                gap: 8,
+                borderBottom: "1px solid rgba(255,255,255,0.08)",
+              }}
+            >
+              <button onClick={onAllOn} style={quickBtnStyle}>
+                All On
+              </button>
+              <button onClick={onAllOff} style={quickBtnStyle}>
+                All Off
+              </button>
             </div>
-          )}
-        </div>
+
+            <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
+              {routeGroupsForMode(transitMode).map((group) => {
+                const allVisible = group.routes.every((r) => visibleRoutes.has(r));
+                const someVisible = group.routes.some((r) => visibleRoutes.has(r));
+                return (
+                  <LineToggle
+                    key={group.label}
+                    label={group.label}
+                    color={group.color}
+                    active={allVisible}
+                    partial={someVisible && !allVisible}
+                    onToggle={() => onToggleGroup(group.label)}
+                  />
+                );
+              })}
+            </div>
+          </>
+        ) : (
+          <AirspacePanelBody count={aircraftCount} />
+        )}
       </div>
     </>
+  );
+}
+
+/** Body shown when the airspace tab is active. The aircraft layer is always
+ *  on while this view is selected, so there are no per-aircraft filters
+ *  yet — just guidance, count, and the ODbL attribution (required when
+ *  the data is being displayed). */
+function AirspacePanelBody({ count }: { count: number }) {
+  return (
+    <div style={{ flex: 1, overflowY: "auto", padding: "16px" }}>
+      <p style={{ color: "#cbd5e1", fontSize: 13, lineHeight: 1.5, margin: 0 }}>
+        Live aircraft within ~40&nbsp;nm of NYC. Click a plane to see its
+        callsign, altitude, ground speed, and heading.
+      </p>
+      <p style={{ color: "#94a3b8", fontSize: 12, lineHeight: 1.5, marginTop: 12 }}>
+        {count > 0
+          ? `Tracking ${count} aircraft.`
+          : "No aircraft in view yet — data refreshes every 8s."}
+      </p>
+      <div style={{ fontSize: 10, color: "#64748b", marginTop: 16, lineHeight: 1.4 }}>
+        Aircraft data:{" "}
+        <a
+          href="https://adsb.lol"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ color: "#94a3b8", textDecoration: "underline" }}
+        >
+          adsb.lol
+        </a>
+        {" "}(ODbL)
+      </div>
+    </div>
+  );
+}
+
+/** Lightweight badge for the airspace view's header — replaces the
+ *  StatusBadge's stale/live indicator with a simple aircraft count, since
+ *  the upstream live/stale concept doesn't translate cleanly. */
+function AirspaceStatusBadge({ count }: { count: number }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "6px 12px",
+        borderRadius: 20,
+        background: "rgba(148, 163, 184, 0.18)",
+        border: "1px solid rgba(148, 163, 184, 0.35)",
+        fontSize: 12,
+        fontWeight: 600,
+      }}
+    >
+      <span
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: "50%",
+          background: "#fef08a",
+        }}
+      />
+      <span style={{ color: "#e2e8f0" }}>Airspace</span>
+      <span style={{ color: "#999", fontVariantNumeric: "tabular-nums" }}>
+        {count} aircraft
+      </span>
+    </div>
   );
 }
 
