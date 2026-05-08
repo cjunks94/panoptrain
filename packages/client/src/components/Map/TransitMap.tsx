@@ -11,11 +11,11 @@ import type {
 } from "@panoptrain/shared";
 import { ROUTE_INFO } from "@panoptrain/shared";
 import type { TrainInfo } from "../../hooks/useTrainFeatures.js";
+import { useAircraftFeatures } from "../../hooks/useAircraftFeatures.js";
 import { useIsMobile } from "../../hooks/useIsMobile.js";
 import { useViewportHeight } from "../../hooks/useViewportHeight.js";
 import { computeFitPadding } from "../../lib/mapPadding.js";
 import { popupOffsetPx } from "../../lib/popupPlacement.js";
-import { aircraftKind } from "../../lib/aircraftFormat.js";
 import { TrainPopup } from "./TrainPopup.js";
 import { MapLoadingBadge } from "./MapLoadingBadge.js";
 import { AircraftPopup } from "./AircraftPopup.js";
@@ -229,6 +229,15 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     [isMobile, panelOpen, viewportHeight],
   );
 
+  // Smoothed aircraft features. The hook does dead-reckoning between polls
+  // (8s cadence is too slow for snap-each-poll motion to read as "flying"),
+  // applies a snap-back lerp when each new poll arrives so the marker
+  // glides into the corrected position instead of teleporting, and fades
+  // out aircraft that drop off ADS-B coverage instead of yanking them off
+  // the map. The geojsonRef is mutated in place by interpolateAircraftFrame
+  // — the RAF loop pushes setData to the "aircraft" source each frame.
+  const { aircraftGeojsonRef, interpolateAircraftFrame } = useAircraftFeatures(aircraft);
+
   // RAF loop — interpolates coordinates and pushes directly to MapLibre (no
   // React renders). When a train is followed, also re-center the camera on
   // it each frame so the user sees a smooth chase. setCenter (vs panTo) is
@@ -242,6 +251,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
       const now = Date.now();
       if (now - lastFrame >= FRAME_INTERVAL) {
         lastFrame = now;
+        const map = mapRef.current?.getMap();
         // interpolateFrame returns false when the snapshot is fully consumed
         // and nothing's changed since last frame — skip the setData upload
         // AND the camera-follow recenter in that case. Big win: between
@@ -249,7 +259,6 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
         // to MapLibre 30 times per second. Camera-follow is also a no-op
         // when the followed train's coordinates didn't change this frame.
         if (interpolateFrame()) {
-          const map = mapRef.current?.getMap();
           const source = map?.getSource("trains");
           if (source && "setData" in source) {
             (source as { setData: (data: GeoJSON.FeatureCollection) => void }).setData(geojsonRef.current);
@@ -271,13 +280,25 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
             }
           }
         }
+        // Aircraft live on a separate animation loop with its own dirty
+        // flag — dead-reckon advances the position every frame regardless
+        // of whether trains needed an update. Returns false only when no
+        // aircraft moved or faded since last frame (e.g. all parked + no
+        // stale fades in flight), so we still avoid pointless setData
+        // uploads on a quiet airspace view.
+        if (interpolateAircraftFrame()) {
+          const aircraftSource = map?.getSource("aircraft");
+          if (aircraftSource && "setData" in aircraftSource) {
+            (aircraftSource as { setData: (data: GeoJSON.FeatureCollection) => void }).setData(aircraftGeojsonRef.current);
+          }
+        }
       }
       rafId = requestAnimationFrame(animate);
     };
 
     rafId = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(rafId);
-  }, [geojsonRef, interpolateFrame]);
+  }, [geojsonRef, interpolateFrame, aircraftGeojsonRef, interpolateAircraftFrame]);
 
   // User dragging the map breaks follow. dragstart fires only on user input,
   // not on programmatic setCenter, so we don't have to debounce or filter.
@@ -619,26 +640,6 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     [trains],
   );
 
-  // Build the aircraft GeoJSON. Recomputed only when the aircraft array
-  // identity changes, which happens on each successful poll — not per
-  // RAF frame, so it's fine to live in a useMemo.
-  const aircraftGeoJson = useMemo<GeoJSON.FeatureCollection>(() => {
-    return {
-      type: "FeatureCollection",
-      features: aircraft.map((a) => ({
-        type: "Feature",
-        geometry: { type: "Point", coordinates: [a.longitude, a.latitude] },
-        properties: {
-          hex: a.hex,
-          // 0 reads as "north" to MapLibre; null tracks land planes
-          // pointing north which is fine for parked / non-broadcasting.
-          track: a.track ?? 0,
-          kind: aircraftKind(a.category),
-        },
-      })),
-    };
-  }, [aircraft]);
-
   // Look up the active popup's train data once per render. Reading from
   // `trains` (state) is fine here because popup CONTENT only changes on
   // poll cycles or filter toggles; per-frame position updates happen via
@@ -944,7 +945,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
           so trains stay legible on top during the most common view
           (zoomed in on Manhattan). */}
       {iconsReady && (
-        <Source id="aircraft" type="geojson" data={aircraftGeoJson}>
+        <Source id="aircraft" type="geojson" data={aircraftGeojsonRef.current}>
           <Layer
             id="aircraft-markers"
             type="symbol"
@@ -968,7 +969,9 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
                 "fixed-wing", "#fef08a", // pale yellow — readable on dark basemap
                 "#cbd5e1",                // slate — unknown / surface
               ],
-              "icon-opacity": 0.9,
+              // Multiplied by per-feature opacity so stale aircraft (off
+              // ADS-B coverage) fade out gracefully rather than vanish.
+              "icon-opacity": ["*", 0.9, ["get", "opacity"]],
               "icon-halo-color": "#0a0a1a",
               "icon-halo-width": 1,
             }}
