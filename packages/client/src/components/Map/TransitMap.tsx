@@ -16,6 +16,7 @@ import { useAircraftFeatures } from "../../hooks/useAircraftFeatures.js";
 import { useIsMobile } from "../../hooks/useIsMobile.js";
 import { useViewportHeight } from "../../hooks/useViewportHeight.js";
 import { computeFitPadding } from "../../lib/mapPadding.js";
+import { airportFocusOptions } from "../../lib/airportFocus.js";
 import { popupOffsetPx } from "../../lib/popupPlacement.js";
 import { TrainPopup } from "./TrainPopup.js";
 import { MapLoadingBadge } from "./MapLoadingBadge.js";
@@ -749,20 +750,36 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
   // Pan to an airport when the user picks it from the panel directory.
   // Map-clicks on airport dots leave flyToToken null so the camera
   // doesn't yank under the user's cursor — only deliberate panel
-  // selections trigger the flight. Zoom 12 keeps surrounding context
-  // visible (other airports, NYC outline) instead of zooming so far
-  // in that the user loses their bearings.
+  // selections trigger the flight.
+  //
+  // Offset + per-importance zoom (computed in airportFocusOptions) puts
+  // the airport pin in the lower portion of the *visible* map area so
+  // the popup has room to extend upward without clipping, with hub
+  // airports getting a wider zoom for surrounding metro context.
+  // Excluding the layout deps from the dep array is intentional — those
+  // values are read at fly time via the closure, and including them
+  // would re-fly every viewport resize.
   useEffect(() => {
     if (!flyToToken) return;
     const airport = AIRPORTS.find((a) => a.iata === flyToToken.iata);
     if (!airport) return;
     const map = mapRef.current?.getMap();
     if (!map) return;
+    const { offset, zoom } = airportFocusOptions({
+      importance: airport.importance,
+      currentZoom: map.getZoom(),
+      isMobile,
+      panelOpen,
+      viewportWidth: typeof window !== "undefined" ? window.innerWidth : 1280,
+      viewportHeight,
+    });
     map.flyTo({
       center: [airport.longitude, airport.latitude],
-      zoom: Math.max(map.getZoom(), 12),
+      zoom,
+      offset,
       duration: 800,
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- layout values read via closure; refly only on token change
   }, [flyToToken]);
 
   // Close train-only state when entering the airspace tab, and the

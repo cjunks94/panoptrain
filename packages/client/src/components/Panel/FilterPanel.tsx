@@ -7,11 +7,13 @@ import type {
   LirrTripPlan,
   TrainPosition,
 } from "@panoptrain/shared";
+import { useRef, useState } from "react";
 import { LineToggle } from "./LineToggle.js";
 import { TripPlanner } from "./TripPlanner.js";
 import { LirrTripPlanner } from "./LirrTripPlanner.js";
 import { ModeTabs } from "./ModeTabs.js";
 import { AirportDirectory } from "./AirportDirectory.js";
+import { shouldDismissSwipe } from "../../lib/bottomSheetSwipe.js";
 import { StatusBadge } from "../Layout/StatusBadge.js";
 import { useIsMobile } from "../../hooks/useIsMobile.js";
 import type { View } from "../../hooks/useView.js";
@@ -72,6 +74,39 @@ export function FilterPanel({
   const isMobile = useIsMobile();
   const isAirspace = view === "airspace";
 
+  // Swipe-to-dismiss for the mobile bottom sheet. Tracks the drag offset
+  // so we can translate the panel under the finger in real time, plus
+  // the start point/time so release-time velocity can decide between
+  // "snap back" and "dismiss" (matches iOS / Material bottom-sheet feel).
+  // Scoped to the drag handle alone — pointer events on the body don't
+  // engage this so the airport directory's scroll still works.
+  const [dragOffset, setDragOffset] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartRef = useRef<{ y: number; t: number } | null>(null);
+
+  const onHandlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isMobile) return;
+    dragStartRef.current = { y: e.clientY, t: Date.now() };
+    setIsDragging(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onHandlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragStartRef.current) return;
+    const deltaY = e.clientY - dragStartRef.current.y;
+    // Only allow downward drag — pulling up shouldn't push the panel
+    // off the top of the screen or invert the dismiss arithmetic.
+    setDragOffset(Math.max(0, deltaY));
+  };
+  const onHandlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragStartRef.current) return;
+    const deltaY = e.clientY - dragStartRef.current.y;
+    const durationMs = Date.now() - dragStartRef.current.t;
+    dragStartRef.current = null;
+    setIsDragging(false);
+    setDragOffset(0); // animates back via the panel's transform transition
+    if (shouldDismissSwipe({ deltaY, durationMs })) onToggle();
+  };
+
   // Below 768px the panel becomes a bottom sheet (full width × 75vh) so the
   // map keeps its full horizontal footprint instead of being squeezed by a
   // 260px sidebar that would eat ~67% of an iPhone 14 viewport (PT-402).
@@ -91,7 +126,11 @@ export function FilterPanel({
         zIndex: 10,
         display: "flex",
         flexDirection: "column",
-        transition: "bottom 0.25s ease",
+        // No transition while the finger is on the handle — the panel
+        // must follow it in real time. After release, transform animates
+        // back to 0 (or `bottom` animates to -100% on dismiss).
+        transition: isDragging ? "none" : "bottom 0.25s ease, transform 0.25s ease",
+        transform: `translateY(${dragOffset}px)`,
         overflow: "hidden",
       }
     : {
@@ -156,6 +195,37 @@ export function FilterPanel({
 
       {/* Panel */}
       <div style={panelStyle}>
+        {/* Mobile drag handle — also the gesture surface for swipe-to-
+            dismiss. Visible only on mobile; on desktop the panel slides
+            horizontally and dragging it down would feel wrong. */}
+        {isMobile && (
+          <div
+            onPointerDown={onHandlePointerDown}
+            onPointerMove={onHandlePointerMove}
+            onPointerUp={onHandlePointerUp}
+            onPointerCancel={onHandlePointerUp}
+            style={{
+              padding: "10px 0 4px",
+              display: "flex",
+              justifyContent: "center",
+              cursor: "grab",
+              // Suppress browser-native scroll/zoom for finger drags on
+              // the handle so our gesture takes the events. Body scroll
+              // is unaffected — the airport directory has its own region.
+              touchAction: "none",
+              flexShrink: 0,
+            }}
+          >
+            <div
+              style={{
+                width: 36,
+                height: 4,
+                borderRadius: 2,
+                background: "rgba(255,255,255,0.3)",
+              }}
+            />
+          </div>
+        )}
         {/* Header */}
         <div
           style={{
