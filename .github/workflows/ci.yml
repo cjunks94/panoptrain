@@ -83,8 +83,26 @@ jobs:
             pnpm download-gtfs:lirr
           fi
 
-      - name: Install Playwright browsers
+      - name: Resolve installed Playwright version
+        id: playwright-version
+        run: |
+          version=$(pnpm --filter @panoptrain/e2e exec node -p "require('@playwright/test/package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}-chromium-webkit
+
+      - name: Install Playwright browsers (cache miss)
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: pnpm --filter @panoptrain/e2e exec playwright install --with-deps chromium webkit
+
+      - name: Install Playwright system deps (cache hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: pnpm --filter @panoptrain/e2e exec playwright install-deps chromium webkit
 
       - run: pnpm test:e2e
 
