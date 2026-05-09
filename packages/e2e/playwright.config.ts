@@ -12,7 +12,12 @@ export default defineConfig({
   // 4 workers locally, capped to 2 in CI where runners are smaller. Each
   // worker spins up its own browser context, so memory scales linearly.
   workers: process.env.CI ? 2 : 4,
-  reporter: process.env.CI ? "github" : "list",
+  // JSON reporter runs alongside the human-facing reporter so we can profile
+  // per-test duration + flake rate across runs (see scripts/profile-flakes.ts).
+  reporter: [
+    [process.env.CI ? "github" : "list"],
+    ["json", { outputFile: "test-results/results.json" }],
+  ],
   use: {
     baseURL: "http://localhost:5173",
     trace: "retain-on-failure",
