@@ -761,6 +761,12 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
   // would re-fly every viewport resize.
   useEffect(() => {
     if (!flyToToken) return;
+    // Stop any active train-follow before flying. The mode-flip effect
+    // below would clear it eventually, but effects run after render and
+    // RAF ticks fire in between — without this guard, the RAF loop
+    // could yank the camera back to the followed train milliseconds
+    // after our flyTo started, defeating the directory click.
+    setFollowTripId(null);
     const airport = AIRPORTS.find((a) => a.iata === flyToToken.iata);
     if (!airport) return;
     const map = mapRef.current?.getMap();

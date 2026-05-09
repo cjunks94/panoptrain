@@ -106,6 +106,17 @@ export function FilterPanel({
     setDragOffset(0); // animates back via the panel's transform transition
     if (shouldDismissSwipe({ deltaY, durationMs })) onToggle();
   };
+  // pointercancel fires when the OS interrupts the touch (system gesture,
+  // notification panel, finger drift off-edge). Treat it as "abandon
+  // drag" — never as a dismiss intent — so a canceled gesture doesn't
+  // accidentally close the sheet just because deltaY happened to be
+  // past the threshold at cancel time.
+  const onHandlePointerCancel = () => {
+    if (!dragStartRef.current) return;
+    dragStartRef.current = null;
+    setIsDragging(false);
+    setDragOffset(0);
+  };
 
   // Below 768px the panel becomes a bottom sheet (full width × 75vh) so the
   // map keeps its full horizontal footprint instead of being squeezed by a
@@ -203,7 +214,7 @@ export function FilterPanel({
             onPointerDown={onHandlePointerDown}
             onPointerMove={onHandlePointerMove}
             onPointerUp={onHandlePointerUp}
-            onPointerCancel={onHandlePointerUp}
+            onPointerCancel={onHandlePointerCancel}
             style={{
               padding: "10px 0 4px",
               display: "flex",
