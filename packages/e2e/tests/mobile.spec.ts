@@ -180,6 +180,11 @@ test.describe("Mobile — Epic 4 readiness", () => {
 
   test.describe("PT-404 plan tab overflow", () => {
     test("all plan tabs are visible (or wrap) without horizontal clipping", async ({ page, viewport }) => {
+      // Plan computation is real graph work (not a mocked snapshot), so on
+      // 2-vCPU CI runners under worker contention the default 30s test
+      // timeout is too tight. test.slow() extends it 3× without bloating
+      // the suite-wide timeout for tests that don't need it.
+      test.slow();
       await page.goto("/");
       await expect(page.getByPlaceholder("From station")).toBeVisible();
 
@@ -213,6 +218,7 @@ test.describe("Mobile — Epic 4 readiness", () => {
 
   test.describe("PT-407 full plan flow on mobile", () => {
     test("complete trip-plan flow renders segments and tabs", async ({ page }) => {
+      test.slow(); // see PT-404 — plan compute under CI contention
       await page.goto("/");
       await expect(page.getByRole("heading", { name: "Panoptrain" })).toBeVisible();
       await expect(page.getByPlaceholder("From station")).toBeVisible();
@@ -230,6 +236,7 @@ test.describe("Mobile — Epic 4 readiness", () => {
     });
 
     test("switching plan alternatives updates the active tab", async ({ page }) => {
+      test.slow(); // see PT-404 — plan compute under CI contention
       await page.goto("/");
       await expect(page.getByPlaceholder("From station")).toBeVisible();
 
