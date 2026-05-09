@@ -42,6 +42,17 @@ const AIRPORTS_GEOJSON: GeoJSON.FeatureCollection = {
     },
   })),
 };
+
+// All airport layer IDs that should open the popup on click. Listed in
+// one place so the click-handler dispatch and `interactiveLayerIds`
+// can't drift when layers are added or renamed. The label layers are
+// included because at zoom 13+ the label is the visual click target.
+const AIRPORT_LAYER_IDS = [
+  "airport-dots",
+  "airport-labels-code",
+  "airport-labels-detail",
+] as const;
+
 // 30fps. Higher than the previous 15fps because the dirty-flag guard in
 // interpolateFrame means we no longer pay the per-frame setData() cost
 // during the idle gap between polls — only during the ~30s of active
@@ -648,13 +659,10 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
         return;
       }
       // At airspace zoom 13+ the label is usually the click target, not
-      // the dot — both label layers carry the same iata so accept any of
-      // the three.
-      if (
-        layerId === "airport-dots" ||
-        layerId === "airport-labels-code" ||
-        layerId === "airport-labels-detail"
-      ) {
+      // the dot — all three layers carry the same iata so any hit
+      // dispatches identically. Membership check against the shared
+      // AIRPORT_LAYER_IDS list keeps this in sync with interactiveLayerIds.
+      if (layerId && (AIRPORT_LAYER_IDS as readonly string[]).includes(layerId)) {
         const iata = feature.properties.iata as string | undefined;
         if (iata) {
           setPopupAirportIata(iata);
@@ -740,13 +748,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
       initialViewState={NYC_CENTER}
       style={{ width: "100%", height: "100%" }}
       mapStyle={BASEMAP}
-      interactiveLayerIds={[
-        "train-markers",
-        "aircraft-markers",
-        "airport-dots",
-        "airport-labels-code",
-        "airport-labels-detail",
-      ]}
+      interactiveLayerIds={["train-markers", "aircraft-markers", ...AIRPORT_LAYER_IDS]}
       onClick={handleClick}
       onLoad={handleMapLoad}
       cursor="pointer"
