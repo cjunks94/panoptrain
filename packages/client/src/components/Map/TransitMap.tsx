@@ -960,10 +960,15 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
           the importance-bucket pattern (2=hubs JFK/LGA/EWR, 1=major
           secondaries, 0=regional GA): hubs visible earliest, regional only
           labeled at high zoom. Bigger dots than transit stations because
-          there are far fewer of them. `beforeId` keeps the layers below
-          aircraft so planes stay legible on top regardless of which mounts
-          first. */}
-      {mode === null && (
+          there are far fewer of them.
+
+          The `iconsReady` guard is load-bearing alongside `mode === null`:
+          each airport layer uses `beforeId="aircraft-markers"`, and
+          MapLibre's addLayer fails silently when the referenced layer
+          doesn't exist yet. If the user lands on the airspace tab before
+          icon init completes, the layers would never render. Gating on
+          iconsReady ensures aircraft-markers is mounted first. */}
+      {mode === null && iconsReady && (
         <Source id="airports" type="geojson" data={AIRPORTS_GEOJSON}>
           <Layer
             id="airport-dots"
