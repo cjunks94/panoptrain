@@ -94,6 +94,15 @@ export function buildShapeIndex(routes: RoutesGeoJSON): Record<string, ShapeData
   const cached = indexByRoutes.get(routes);
   if (cached) return cached;
 
+  // bestShapeCache values are direct ShapeData references; its keys are
+  // `${routeId}:gridCell`. snapCache values are numeric distances under
+  // globally-unique shapeId keys, so it stays warm across builds. But
+  // routeIds can collide between subway and LIRR (per the documented
+  // numeric-routeId overlap), and a stale ShapeData ref would route a
+  // LIRR train through the matching subway shape's geometry. Clear here
+  // — it'll re-warm naturally as cachedBestShape is exercised.
+  bestShapeCache.clear();
+
   const index: Record<string, ShapeData[]> = {};
   for (const feature of routes.features) {
     const routeId = feature.properties.routeId;

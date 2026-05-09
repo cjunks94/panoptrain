@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { RoutesGeoJSON } from "@panoptrain/shared";
-import { _resetTrackCachesForTests, buildShapeIndex } from "../trackInterpolation.js";
+import {
+  _resetTrackCachesForTests,
+  buildShapeIndex,
+  findTrackPath,
+  getTrackCacheSizes,
+} from "../trackInterpolation.js";
 
 /**
  * Pins the lifecycle of `buildShapeIndex` w.r.t. mode-tab switching:
@@ -72,5 +77,31 @@ describe("buildShapeIndex — back-and-forth between two routes payloads", () =>
     expect(a2).toBe(a1);
     expect(b2).toBe(b1);
     expect(a1).not.toBe(b1);
+  });
+});
+
+describe("buildShapeIndex — cache lifecycle on rebuild", () => {
+  // snapCache is keyed by globally-unique shapeId, so it stays warm
+  // across builds. bestShapeCache values are direct ShapeData refs and
+  // its keys are routeId-based — and routeIds can collide between
+  // subway and LIRR — so a stale ref would route the wrong line through
+  // findTrackPath. Verify the asymmetric clear: snap survives, bestShape
+  // resets each rebuild.
+  it("clears bestShapeCache but preserves snapCache when building a new index", () => {
+    const coordsA: [number, number][] = Array.from({ length: 30 }, (_, i) => [-74 + i * 0.001, 40.7]);
+    const coordsB: [number, number][] = Array.from({ length: 30 }, (_, i) => [-73 + i * 0.001, 40.8]);
+    const routesA = makeRoutes([{ routeId: "A", coords: coordsA }]);
+    const routesB = makeRoutes([{ routeId: "B", coords: coordsB }]);
+
+    const indexA = buildShapeIndex(routesA);
+    findTrackPath(indexA, "A", coordsA[5]!, coordsA[10]!);
+    const after = getTrackCacheSizes();
+    expect(after.snap).toBeGreaterThan(0);
+    expect(after.bestShape).toBeGreaterThan(0);
+
+    buildShapeIndex(routesB);
+    const afterRebuild = getTrackCacheSizes();
+    expect(afterRebuild.snap).toBeGreaterThanOrEqual(after.snap); // snap kept + B's prewarm seeded more
+    expect(afterRebuild.bestShape).toBe(0); // bestShape cleared on rebuild
   });
 });
