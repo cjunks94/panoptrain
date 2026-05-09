@@ -122,26 +122,25 @@ export function _resetTrackCachesForTests(): void {
   bestShapeCache.clear();
 }
 
-// Single-slot scheduler: a pending prewarm gets cancelled before a new one
-// is scheduled. Without this, a rebuild that fires before the previous idle
-// callback runs would let the stale callback populate snapCache with the
-// old index's distances under shapeIds the new index has reused — a real
-// poisoning hazard since shapeId resets to 0 each rebuild.
-let pendingIdleHandle: number | undefined;
+// Idle scheduler — fires the callback when the browser is idle, falls
+// back to setTimeout where requestIdleCallback isn't available.
+//
+// No cancellation here. The previous single-slot cancel-and-replace
+// existed to defend against shape-id reuse across rebuilds (each build
+// reset shapeId to 0, so a stale prewarm could poison snapCache with
+// distances under IDs the new index had reused). With shapeIdCounter
+// now globally unique, that hazard is gone — and cancelling actively
+// hurts: a user who flips subway → LIRR before subway's prewarm runs
+// would lose subway's prewarm permanently, since the WeakMap-cached
+// subway index returns instantly on re-entry without rescheduling.
 const hasIdleApi = typeof globalThis.requestIdleCallback === "function";
 
 function scheduleIdle(cb: () => void): void {
-  if (pendingIdleHandle !== undefined) {
-    if (hasIdleApi) globalThis.cancelIdleCallback!(pendingIdleHandle);
-    else clearTimeout(pendingIdleHandle);
+  if (hasIdleApi) {
+    globalThis.requestIdleCallback!(cb);
+    return;
   }
-  const wrapped = () => {
-    pendingIdleHandle = undefined;
-    cb();
-  };
-  pendingIdleHandle = hasIdleApi
-    ? globalThis.requestIdleCallback!(wrapped)
-    : (setTimeout(wrapped, 1) as unknown as number);
+  setTimeout(cb, 1);
 }
 
 /** Expose snap/bestShape cache sizes for diagnostics and tests. */
