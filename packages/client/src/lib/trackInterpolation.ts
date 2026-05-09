@@ -73,40 +73,53 @@ function cachedBestShape(
   return { shape: result, tooFar: bestDist > 0.5 };
 }
 
-// Memoize the most recent (routes → index) pair. On tab-switch the same
-// cached routes object is handed back through useRouteShapes; without this
-// every re-mount would rebuild the index AND clear the warmed snap caches,
-// which is the bottleneck behind the LIRR tab-switch hitch.
-let lastIndexedRoutes: RoutesGeoJSON | undefined;
-let lastIndex: Record<string, ShapeData[]> | undefined;
+// Memoize indexes per routes payload. WeakMap-keyed by the cached routes
+// object (from modeCache), so subway → LIRR → subway re-uses the original
+// subway index instead of rebuilding it. The cached routes object is
+// stable across remounts of useRouteShapes.
+const indexByRoutes = new WeakMap<RoutesGeoJSON, Record<string, ShapeData[]>>();
+
+// Globally-unique shape IDs. Per-build counters would collide across the
+// snap/bestShape caches when two indexes are alive simultaneously
+// (subway + LIRR after the first tab switch). With a global counter we
+// can keep both caches warm without the per-build clear that defeated
+// the purpose of memoizing indexes in the first place.
+let shapeIdCounter = 0;
 
 /**
  * Index route shapes by routeId for quick lookup.
  * Each route may have multiple shapes (directions/branches).
  */
 export function buildShapeIndex(routes: RoutesGeoJSON): Record<string, ShapeData[]> {
-  if (routes === lastIndexedRoutes && lastIndex) return lastIndex;
+  const cached = indexByRoutes.get(routes);
+  if (cached) return cached;
 
   const index: Record<string, ShapeData[]> = {};
-  let shapeId = 0;
   for (const feature of routes.features) {
     const routeId = feature.properties.routeId;
     if (!index[routeId]) index[routeId] = [];
     const coords = feature.geometry.coordinates;
     if (coords.length < 2) continue;
     const line = lineString(coords);
-    index[routeId].push({ line, totalLength: turfLength(line), id: shapeId++ });
+    index[routeId].push({ line, totalLength: turfLength(line), id: shapeIdCounter++ });
   }
-  // Clear caches when shapes change
-  snapCache.clear();
-  bestShapeCache.clear();
   // Schedule a snap-cache prewarm for idle time. Without it the first poll's
   // hundreds of trains all hit cold caches and stall the main thread on Turf
   // nearestPointOnLine. Idle scheduling keeps it off the first-paint path.
   scheduleIdle(() => prewarmTrackCaches(index));
-  lastIndexedRoutes = routes;
-  lastIndex = index;
+  indexByRoutes.set(routes, index);
   return index;
+}
+
+/** Test helper — clear the snap/bestShape caches so each test starts
+ *  from a known empty state. The index WeakMap doesn't need explicit
+ *  clearing in tests because each test creates fresh routes objects
+ *  (always cache misses). Production code shouldn't call this; LRU
+ *  eviction handles cache growth and the WeakMap drops indexes when
+ *  the routes object is GC'd. */
+export function _resetTrackCachesForTests(): void {
+  snapCache.clear();
+  bestShapeCache.clear();
 }
 
 // Single-slot scheduler: a pending prewarm gets cancelled before a new one

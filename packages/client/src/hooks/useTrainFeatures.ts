@@ -77,6 +77,24 @@ export function useTrainFeatures(
     shapeIndexRef.current = buildShapeIndex(routeShapes);
   }, [routeShapes]);
 
+  // Clear interpolation tracking on mode change. Prior to mode-cache
+  // hydration this was handled implicitly by the data===null reset block
+  // below — useTrainPositions cleared data on flip. Now that cache hits
+  // hand back non-null data instantly, the data-null reset never fires,
+  // and the snapshot-shift effect would carry the previous mode's
+  // prevPositions/trackPaths across (LIRR positions interpolating into
+  // subway coordinates). Clearing here keeps interpolation honest;
+  // geojsonRef + the React `trains` state are left for the rebuild
+  // effect below to refill from the new mode's data.
+  useEffect(() => {
+    lastDataRef.current = null;
+    prevPositions.current = new Map();
+    currPositions.current = new Map();
+    trackPaths.current = new Map();
+    shapeIndexRef.current = {};
+    lastRenderedFraction.current = -1;
+  }, [mode]);
+
   // Shift position snapshots when new data arrives (fast — no heavy computation)
   useEffect(() => {
     if (!data || data === lastDataRef.current) return;

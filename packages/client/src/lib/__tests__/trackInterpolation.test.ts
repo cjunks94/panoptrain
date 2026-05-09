@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { RoutesGeoJSON } from "@panoptrain/shared";
 import {
+  _resetTrackCachesForTests,
   buildShapeIndex,
   prewarmTrackCaches,
   getTrackCacheSizes,
@@ -28,13 +29,17 @@ function makeRoutes(features: Array<{ routeId: string; coords: [number, number][
 
 // Use requestIdleCallback's polyfill path: jsdom doesn't define it, so
 // `buildShapeIndex` already routes through setTimeout. Stub setTimeout so
-// the prewarm runs synchronously inside this test.
+// the prewarm runs synchronously inside this test. Cache reset is needed
+// now that buildShapeIndex no longer clears snap/bestShape caches itself
+// (globally-unique shape IDs make per-build clears unnecessary in prod
+// but tests need explicit isolation).
 beforeEach(() => {
   vi.unstubAllGlobals();
   vi.stubGlobal("setTimeout", ((fn: () => void) => {
     fn();
     return 0;
   }) as unknown as typeof setTimeout);
+  _resetTrackCachesForTests();
 });
 
 describe("prewarmTrackCaches", () => {

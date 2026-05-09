@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { RoutesGeoJSON } from "@panoptrain/shared";
-import { buildShapeIndex } from "../trackInterpolation.js";
+import { _resetTrackCachesForTests, buildShapeIndex } from "../trackInterpolation.js";
 
 /**
  * Pins the lifecycle of `buildShapeIndex` w.r.t. mode-tab switching:
@@ -29,6 +29,7 @@ beforeEach(() => {
     fn();
     return 0;
   }) as unknown as typeof setTimeout);
+  _resetTrackCachesForTests();
 });
 
 describe("buildShapeIndex — same routes reference", () => {
@@ -49,5 +50,27 @@ describe("buildShapeIndex — different routes object", () => {
     const first = buildShapeIndex(routes1);
     const second = buildShapeIndex(routes2);
     expect(second).not.toBe(first);
+  });
+});
+
+describe("buildShapeIndex — back-and-forth between two routes payloads", () => {
+  // The real subway↔LIRR↔subway tab dance. The first build for each
+  // payload is the cold path; subsequent builds for the same payload
+  // must return the originally-cached index without rebuilding (so the
+  // warmed turf snap caches stay valid).
+  it("preserves the original index for each payload across alternating calls", () => {
+    const coordsA: [number, number][] = Array.from({ length: 20 }, (_, i) => [-74 + i * 0.001, 40.7]);
+    const coordsB: [number, number][] = Array.from({ length: 20 }, (_, i) => [-73 + i * 0.001, 40.8]);
+    const routesA = makeRoutes([{ routeId: "A", coords: coordsA }]);
+    const routesB = makeRoutes([{ routeId: "B", coords: coordsB }]);
+
+    const a1 = buildShapeIndex(routesA);
+    const b1 = buildShapeIndex(routesB);
+    const a2 = buildShapeIndex(routesA);
+    const b2 = buildShapeIndex(routesB);
+
+    expect(a2).toBe(a1);
+    expect(b2).toBe(b1);
+    expect(a1).not.toBe(b1);
   });
 });
