@@ -40,7 +40,7 @@ test.describe("Mobile — core functionality", () => {
   test("train data loads on mobile", async ({ page }) => {
     await page.goto("/");
     const count = page.locator("text=/\\d+ trains/");
-    await expect(count).toBeVisible({ timeout: 30_000 });
+    await expect(count).toBeVisible({ timeout: 5_000 });
   });
 
   test("trip planner is accessible on mobile", async ({ page }) => {
@@ -189,7 +189,10 @@ test.describe("Mobile — Epic 4 readiness", () => {
       await page.getByRole("button", { name: "Find Route" }).click();
 
       const recommended = page.getByRole("button", { name: /Recommended/ });
-      await expect(recommended).toBeVisible({ timeout: 15_000 });
+      // Plan computation is real graph work, not a mocked snapshot — bump
+      // the timeout above the 5s baseline so worker contention under
+      // fullyParallel doesn't flake this assertion.
+      await expect(recommended).toBeVisible({ timeout: 10_000 });
 
       const tabs = page.getByRole("button", { name: /^(Recommended|Avoids|Alternative)/ });
       const n = await tabs.count();
@@ -218,8 +221,8 @@ test.describe("Mobile — Epic 4 readiness", () => {
       await page.getByPlaceholder("To station").fill("14 St-Union Sq");
       await page.getByRole("button", { name: "Find Route" }).click();
 
-      // Plan summary
-      await expect(page.locator("text=/\\d+ min/").first()).toBeVisible({ timeout: 15_000 });
+      // Plan summary — same parallel-contention reasoning as PT-404 above.
+      await expect(page.locator("text=/\\d+ min/").first()).toBeVisible({ timeout: 10_000 });
       // At least one ride segment "X → Y"
       await expect(page.getByText(/→/).first()).toBeVisible();
       // Recommended tab present
@@ -235,7 +238,7 @@ test.describe("Mobile — Epic 4 readiness", () => {
       await page.getByRole("button", { name: "Find Route" }).click();
 
       const recommended = page.getByRole("button", { name: /Recommended/ });
-      await expect(recommended).toBeVisible({ timeout: 15_000 });
+      await expect(recommended).toBeVisible({ timeout: 10_000 });
 
       // Find an alternative tab
       const alt = page.getByRole("button", { name: /^(Avoids|Alternative)/ }).first();
