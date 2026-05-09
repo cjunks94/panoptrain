@@ -287,7 +287,10 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
   // out aircraft that drop off ADS-B coverage instead of yanking them off
   // the map. The geojsonRef is mutated in place by interpolateAircraftFrame
   // — the RAF loop pushes setData to the "aircraft" source each frame.
-  const { aircraftGeojsonRef, interpolateAircraftFrame } = useAircraftFeatures(aircraft);
+  // mode === null means the airspace view is active; flipping away from
+  // airspace is the signal to drop carried-forward aircraft immediately
+  // rather than letting them fade for ~20s on top of another mode.
+  const { aircraftGeojsonRef, interpolateAircraftFrame } = useAircraftFeatures(aircraft, mode === null);
 
   // RAF loop — interpolates coordinates and pushes directly to MapLibre (no
   // React renders). When a train is followed, also re-center the camera on

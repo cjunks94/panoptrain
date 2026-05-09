@@ -75,7 +75,7 @@ function snapshotFromAircraft(a: Aircraft): AircraftSnapshot {
  * deltas are small (<10°) and sudden true heading changes (e.g. turning
  * onto an approach) are correct to render immediately, not gradually.
  */
-export function useAircraftFeatures(aircraft: Aircraft[]) {
+export function useAircraftFeatures(aircraft: Aircraft[], enabled: boolean) {
   const stateRef = useRef(new Map<string, AircraftEntry>());
   const geojsonRef = useRef<GeoJSON.FeatureCollection>(EMPTY_FC);
   // Keyed by hex so feature objects survive across polls — we mutate
@@ -89,7 +89,20 @@ export function useAircraftFeatures(aircraft: Aircraft[]) {
   // and new aircraft would sit invisible until they moved.
   const dirtyRef = useRef(true);
 
+  // When the airspace view is toggled off (mode flip away from airspace),
+  // drop everything immediately. Otherwise the carry-forward fade window
+  // would leave aircraft visible on top of subway/LIRR for ~20s — the
+  // fade was meant for missed-poll resilience, not for tab-switch unloads.
   useEffect(() => {
+    if (enabled) return;
+    stateRef.current = new Map();
+    featuresByHex.current = new Map();
+    geojsonRef.current = EMPTY_FC;
+    dirtyRef.current = true;
+  }, [enabled]);
+
+  useEffect(() => {
+    if (!enabled) return;
     const now = Date.now();
     const next = new Map<string, AircraftEntry>();
 
@@ -160,7 +173,7 @@ export function useAircraftFeatures(aircraft: Aircraft[]) {
     featuresByHex.current = nextByHex;
     geojsonRef.current = { type: "FeatureCollection", features };
     dirtyRef.current = true;
-  }, [aircraft]);
+  }, [aircraft, enabled]);
 
   const interpolateFrame = useCallback((): boolean => {
     const now = Date.now();

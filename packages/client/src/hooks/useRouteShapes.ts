@@ -1,6 +1,12 @@
 import { useState, useEffect } from "react";
 import type { Mode, RoutesGeoJSON, StopsGeoJSON } from "@panoptrain/shared";
 import { fetchRoutes, fetchStops } from "../lib/api.js";
+import {
+  getRoutes as getCachedRoutes,
+  setRoutes as setCachedRoutes,
+  getStops as getCachedStops,
+  setStops as setCachedStops,
+} from "../lib/modeCache.js";
 
 interface UseRouteShapesResult {
   routeShapes: RoutesGeoJSON | null;
@@ -15,25 +21,42 @@ export function useRouteShapes(mode: Mode | null): UseRouteShapesResult {
   useEffect(() => {
     let cancelled = false;
 
-    // Reset state on mode flip so we don't show subway shapes briefly while
-    // LIRR data is still loading. Same reset path covers the airspace flip
-    // (mode === null) since transit shapes have no place there either.
-    setRouteShapes(null);
-    setStopsGeoJson(null);
+    if (mode === null) {
+      // Airspace view — clear transit shapes (no place for them here).
+      setRouteShapes(null);
+      setStopsGeoJson(null);
+      return;
+    }
 
-    if (mode === null) return; // airspace view — no shapes/stops to fetch
+    // Cache hit replaces the prior mode's payload synchronously, so there's
+    // no need to flash null first. On miss, set null then fetch — preserves
+    // the original "don't show subway shapes briefly while LIRR loads"
+    // guarantee. Stops and routes resolve independently (PT-104).
+    const cachedRoutes = getCachedRoutes(mode);
+    setRouteShapes(cachedRoutes ?? null);
 
-    // Fetch stops and routes independently so each renders as soon as it's
-    // ready (PT-104). The routes GeoJSON is multi-MB; previously Promise.all
-    // held back the smaller stops payload until both resolved. With them
-    // decoupled, station dots/labels appear well before the route lines.
-    fetchStops(mode)
-      .then((stops) => { if (!cancelled) setStopsGeoJson(enrichStops(stops)); })
-      .catch((err) => console.error("Failed to load stops:", err));
+    const cachedStops = getCachedStops(mode);
+    setStopsGeoJson(cachedStops ? enrichStops(cachedStops) : null);
 
-    fetchRoutes(mode)
-      .then((routes) => { if (!cancelled) setRouteShapes(routes); })
-      .catch((err) => console.error("Failed to load routes:", err));
+    if (!cachedStops) {
+      fetchStops(mode)
+        .then((stops) => {
+          if (cancelled) return;
+          setCachedStops(mode, stops);
+          setStopsGeoJson(enrichStops(stops));
+        })
+        .catch((err) => console.error("Failed to load stops:", err));
+    }
+
+    if (!cachedRoutes) {
+      fetchRoutes(mode)
+        .then((routes) => {
+          if (cancelled) return;
+          setCachedRoutes(mode, routes);
+          setRouteShapes(routes);
+        })
+        .catch((err) => console.error("Failed to load routes:", err));
+    }
 
     return () => {
       cancelled = true;

@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { RoutesGeoJSON } from "@panoptrain/shared";
 import {
+  _resetTrackCachesForTests,
   buildShapeIndex,
   prewarmTrackCaches,
   getTrackCacheSizes,
@@ -28,13 +29,23 @@ function makeRoutes(features: Array<{ routeId: string; coords: [number, number][
 
 // Use requestIdleCallback's polyfill path: jsdom doesn't define it, so
 // `buildShapeIndex` already routes through setTimeout. Stub setTimeout so
-// the prewarm runs synchronously inside this test.
+// the prewarm runs synchronously inside this test. Cache reset is needed
+// now that buildShapeIndex no longer clears snap/bestShape caches itself
+// (globally-unique shape IDs make per-build clears unnecessary in prod
+// but tests need explicit isolation).
 beforeEach(() => {
   vi.unstubAllGlobals();
   vi.stubGlobal("setTimeout", ((fn: () => void) => {
     fn();
     return 0;
   }) as unknown as typeof setTimeout);
+  _resetTrackCachesForTests();
+});
+
+// Restore real timers so later tests in the same worker don't inherit
+// the synchronous setTimeout stub (vitest reuses workers across files).
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("prewarmTrackCaches", () => {
@@ -58,19 +69,18 @@ describe("prewarmTrackCaches", () => {
     expect(getTrackCacheSizes().snap).toBe(before);
   });
 
-  it("cancels a pending prewarm when buildShapeIndex runs again before idle fires", () => {
-    // Defer setTimeout instead of running synchronously so we can simulate a
-    // rebuild while the first prewarm is still pending. Without the in-module
-    // cancellation, the first callback would run after the second
-    // buildShapeIndex's clear and poison snapCache with shapeId-0 distances
-    // from the stale index.
-    const queued: Array<{ id: number; fn: () => void }> = [];
-    let nextId = 1;
+  it("schedules independent prewarms when buildShapeIndex runs twice before idle fires", () => {
+    // The earlier shape-id-reset poisoning hazard required cancelling the
+    // pending prewarm before scheduling a new one. With shapeIdCounter
+    // now globally unique, both prewarms run safely back-to-back, and
+    // dropping the cancellation also fixes the WeakMap-cached re-entry
+    // path (a cancelled-but-never-rescheduled prewarm leaves the first
+    // mode permanently cold).
+    const queued: Array<() => void> = [];
     const cleared: number[] = [];
     vi.stubGlobal("setTimeout", ((fn: () => void) => {
-      const id = nextId++;
-      queued.push({ id, fn });
-      return id;
+      queued.push(fn);
+      return queued.length;
     }) as unknown as typeof setTimeout);
     vi.stubGlobal("clearTimeout", ((id: number) => { cleared.push(id); }) as unknown as typeof clearTimeout);
 
@@ -78,27 +88,20 @@ describe("prewarmTrackCaches", () => {
     buildShapeIndex(makeRoutes([{ routeId: "A", coords: coords1 }]));
     expect(queued).toHaveLength(1);
 
-    // Mode flip / second load before the first idle fires.
+    // Mode flip / second load before the first idle fires — second
+    // prewarm queues alongside the first; neither is cancelled.
     const coords2: [number, number][] = Array.from({ length: 30 }, (_, i) => [-73 + i * 0.001, 40.8]);
     buildShapeIndex(makeRoutes([{ routeId: "B", coords: coords2 }]));
 
-    // The first scheduled handle (id=1) must have been cancelled. The second
-    // is still pending at id=2.
-    expect(cleared).toContain(1);
+    expect(cleared).toEqual([]);
     expect(queued).toHaveLength(2);
 
-    // Fire what's still actually queued — clearTimeout in real browsers
-    // removes the callback from the queue, so the test simulator skips
-    // cancelled IDs to mirror that.
-    for (const { id, fn } of queued) {
-      if (cleared.includes(id)) continue;
-      fn();
-    }
-    // Coords1 (~lat 40.7, lon -74) and coords2 (~lat 40.8, lon -73) live in
-    // disjoint grid cells, so without cancellation we'd see entries from both
-    // prewarms (12 keys). With cancellation, only coords2's 6 samples (every
-    // 5th of 30 coords) survive.
-    expect(getTrackCacheSizes().snap).toBe(6);
+    for (const fn of queued) fn();
+
+    // Coords1 (~lat 40.7, lon -74) and coords2 (~lat 40.8, lon -73) live
+    // in disjoint grid cells, so both prewarms' 6 samples each (every
+    // 5th of 30 coords) seed the cache without colliding.
+    expect(getTrackCacheSizes().snap).toBe(12);
   });
 
   it("tolerates degenerate shapes without throwing", () => {
