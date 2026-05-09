@@ -15,6 +15,12 @@ COPY packages/shared/ packages/shared/
 COPY packages/server/ packages/server/
 COPY packages/client/ packages/client/
 
+# Re-run install so per-package node_modules symlinks (tsc, vite) resolve.
+# The bare-package.json install at the prior layer was insufficient on its
+# own — diagnosing/fixing that properly is a separate task; this unblocks
+# the local cache-test build.
+RUN pnpm install --frozen-lockfile
+
 # Build client static files
 RUN pnpm --filter @panoptrain/client build
 
