@@ -14,6 +14,7 @@ interface AirportPopupProps {
 export function AirportPopup({ airport, onClose }: AirportPopupProps) {
   return (
     <Popup
+      className="airport-popup"
       longitude={airport.longitude}
       latitude={airport.latitude}
       anchor="bottom"
@@ -40,13 +41,16 @@ export function AirportPopup({ airport, onClose }: AirportPopupProps) {
         <FrequenciesSection frequencies={airport.frequencies} />
         <RunwaysSection runways={airport.runways} />
       </div>
+      {/* Scoped via the .airport-popup className on the Popup root so we
+          don't unintentionally restyle other map popups (e.g. aircraft)
+          while this one is open. */}
       <style>{`
-        .maplibregl-popup-content {
+        .airport-popup .maplibregl-popup-content {
           background: transparent !important;
           padding: 0 !important;
           box-shadow: none !important;
         }
-        .maplibregl-popup-tip {
+        .airport-popup .maplibregl-popup-tip {
           border-top-color: rgba(15, 23, 42, 0.97) !important;
         }
       `}</style>
