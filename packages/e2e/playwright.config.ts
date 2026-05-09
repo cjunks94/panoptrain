@@ -35,7 +35,6 @@ export default defineConfig({
     {
       name: "mobile-safari",
       use: { ...devices["iPhone 14"] },
-      dependencies: ["chromium"], // reuse server from chromium run
     },
   ],
   webServer: [
