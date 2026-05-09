@@ -1010,18 +1010,64 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
         </Source>
       )}
 
+      {/* Aircraft (airspace overlay). Empty FeatureCollection when the
+          overlay is toggled off so we don't conditionally mount the layer
+          and pay the addLayer/removeLayer churn on each toggle. The
+          re-promote effect ordering keeps this layer below train markers
+          so trains stay legible on top during the most common view
+          (zoomed in on Manhattan).
+
+          Declared BEFORE the airports block on purpose: airport layers
+          use `beforeId="aircraft-markers"`, and MapLibre's addLayer
+          throws when that reference doesn't exist yet. react-map-gl
+          processes JSX children top-down in a single commit, so
+          aircraft-markers must appear first or the airport mount fails. */}
+      {iconsReady && (
+        <Source id="aircraft" type="geojson" data={aircraftGeojsonRef.current}>
+          <Layer
+            id="aircraft-markers"
+            type="symbol"
+            layout={{
+              "icon-image": "marker-plane",
+              "icon-size": [
+                "interpolate", ["linear"], ["zoom"],
+                9, 0.35,
+                14, 0.55,
+              ],
+              "icon-rotate": ["get", "track"],
+              "icon-rotation-alignment": "map",
+              "icon-allow-overlap": true,
+              "icon-ignore-placement": true,
+            }}
+            paint={{
+              "icon-color": [
+                "match",
+                ["get", "kind"],
+                "helicopter", "#fb923c", // orange — visually distinct from jet
+                "fixed-wing", "#fef08a", // pale yellow — readable on dark basemap
+                "#cbd5e1",                // slate — unknown / surface
+              ],
+              // Multiplied by per-feature opacity so stale aircraft (off
+              // ADS-B coverage) fade out gracefully rather than vanish.
+              "icon-opacity": ["*", 0.9, ["get", "opacity"]],
+              "icon-halo-color": "#0a0a1a",
+              "icon-halo-width": 1,
+            }}
+          />
+        </Source>
+      )}
+
       {/* Airports — the airspace equivalent of transit stations. Mirrors
           the importance-bucket pattern (2=hubs JFK/LGA/EWR, 1=major
           secondaries, 0=regional GA): hubs visible earliest, regional only
           labeled at high zoom. Bigger dots than transit stations because
           there are far fewer of them.
 
-          The `iconsReady` guard is load-bearing alongside `mode === null`:
-          each airport layer uses `beforeId="aircraft-markers"`, and
-          MapLibre's addLayer fails silently when the referenced layer
-          doesn't exist yet. If the user lands on the airspace tab before
-          icon init completes, the layers would never render. Gating on
-          iconsReady ensures aircraft-markers is mounted first. */}
+          Each airport layer uses `beforeId="aircraft-markers"` so it
+          renders below the planes. That reference requires
+          aircraft-markers to already be mounted — see the comment on
+          the aircraft <Source> above for why this block must stay AFTER
+          aircraft in JSX order. */}
       {mode === null && iconsReady && (
         <Source id="airports" type="geojson" data={AIRPORTS_GEOJSON}>
           <Layer
@@ -1125,47 +1171,6 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
               "text-color": "#e2e8f0",
               "text-halo-color": "#0a0a1a",
               "text-halo-width": 2,
-            }}
-          />
-        </Source>
-      )}
-
-      {/* Aircraft (airspace overlay). Empty FeatureCollection when the
-          overlay is toggled off so we don't conditionally mount the layer
-          and pay the addLayer/removeLayer churn on each toggle. The
-          re-promote effect ordering keeps this layer below train markers
-          so trains stay legible on top during the most common view
-          (zoomed in on Manhattan). */}
-      {iconsReady && (
-        <Source id="aircraft" type="geojson" data={aircraftGeojsonRef.current}>
-          <Layer
-            id="aircraft-markers"
-            type="symbol"
-            layout={{
-              "icon-image": "marker-plane",
-              "icon-size": [
-                "interpolate", ["linear"], ["zoom"],
-                9, 0.35,
-                14, 0.55,
-              ],
-              "icon-rotate": ["get", "track"],
-              "icon-rotation-alignment": "map",
-              "icon-allow-overlap": true,
-              "icon-ignore-placement": true,
-            }}
-            paint={{
-              "icon-color": [
-                "match",
-                ["get", "kind"],
-                "helicopter", "#fb923c", // orange — visually distinct from jet
-                "fixed-wing", "#fef08a", // pale yellow — readable on dark basemap
-                "#cbd5e1",                // slate — unknown / surface
-              ],
-              // Multiplied by per-feature opacity so stale aircraft (off
-              // ADS-B coverage) fade out gracefully rather than vanish.
-              "icon-opacity": ["*", 0.9, ["get", "opacity"]],
-              "icon-halo-color": "#0a0a1a",
-              "icon-halo-width": 1,
             }}
           />
         </Source>
