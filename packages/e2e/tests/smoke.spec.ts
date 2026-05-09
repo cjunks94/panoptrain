@@ -11,10 +11,10 @@ test.describe("Panoptrain — happy path", () => {
 
     // Status badge should show Live with a non-zero train count after first poll
     const status = page.locator("text=/Live/");
-    await expect(status).toBeVisible({ timeout: 30_000 });
+    await expect(status).toBeVisible({ timeout: 5_000 });
 
     const count = page.locator("text=/\\d+ trains/");
-    await expect(count).toBeVisible({ timeout: 30_000 });
+    await expect(count).toBeVisible({ timeout: 5_000 });
     const countText = await count.textContent();
     const num = parseInt(countText!.match(/(\d+)/)![1], 10);
     expect(num).toBeGreaterThan(0);
@@ -25,7 +25,7 @@ test.describe("Panoptrain — happy path", () => {
     await expect(page.getByRole("heading", { name: "Panoptrain" })).toBeVisible();
 
     // Wait for trains to load
-    await expect(page.locator("text=/\\d+ trains/")).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator("text=/\\d+ trains/")).toBeVisible({ timeout: 5_000 });
 
     await page.getByRole("button", { name: "All Off" }).click();
     await page.getByRole("button", { name: "All On" }).click();
