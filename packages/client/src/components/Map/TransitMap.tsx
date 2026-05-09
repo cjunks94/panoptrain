@@ -19,6 +19,7 @@ import { popupOffsetPx } from "../../lib/popupPlacement.js";
 import { TrainPopup } from "./TrainPopup.js";
 import { MapLoadingBadge } from "./MapLoadingBadge.js";
 import { AircraftPopup } from "./AircraftPopup.js";
+import { AirportPopup } from "./AirportPopup.js";
 import type { GeoJSON } from "geojson";
 
 const BASEMAP = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
@@ -212,6 +213,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
   const [iconsReady, setIconsReady] = useState(false);
   const [followTripId, setFollowTripId] = useState<string | null>(null);
   const [popupAircraftHex, setPopupAircraftHex] = useState<string | null>(null);
+  const [popupAirportIata, setPopupAirportIata] = useState<string | null>(null);
   const mapRef = useRef<MapRef>(null);
   const popupOverlayRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
@@ -629,15 +631,27 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
       if (!feature || !feature.properties) {
         setPopupTripId(null);
         setPopupAircraftHex(null);
+        setPopupAirportIata(null);
         return;
       }
-      // Layer dispatch — aircraft markers and train markers share the same
-      // click event but live in different layers.
+      // Layer dispatch — aircraft markers, train markers, and airport
+      // dots all flow through the same click event but live in different
+      // layers and key off different properties.
       const layerId = feature.layer?.id;
       if (layerId === "aircraft-markers") {
         const hex = feature.properties.hex as string | undefined;
         if (hex) {
           setPopupAircraftHex(hex);
+          setPopupTripId(null);
+          setPopupAirportIata(null);
+        }
+        return;
+      }
+      if (layerId === "airport-dots") {
+        const iata = feature.properties.iata as string | undefined;
+        if (iata) {
+          setPopupAirportIata(iata);
+          setPopupAircraftHex(null);
           setPopupTripId(null);
         }
         return;
@@ -653,6 +667,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
       if (trains.some((t) => t.tripId === tripId)) {
         setPopupTripId(tripId);
         setPopupAircraftHex(null);
+        setPopupAirportIata(null);
       }
     },
     [trains],
@@ -674,6 +689,13 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     [popupAircraftHex, aircraft],
   );
 
+  // Airport popup lookup. AIRPORTS is a static const so the find is cheap
+  // (11 entries) and doesn't need to be in the dep array.
+  const popupAirport = useMemo(
+    () => (popupAirportIata ? AIRPORTS.find((a) => a.iata === popupAirportIata) ?? null : null),
+    [popupAirportIata],
+  );
+
   // If the popup's train falls out of the snapshot (TTL eviction, mode flip,
   // route filter), close the popup so it doesn't keep tracking a ghost.
   useEffect(() => {
@@ -686,6 +708,13 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     if (popupAircraftHex && !popupAircraft) setPopupAircraftHex(null);
   }, [popupAircraftHex, popupAircraft]);
 
+  // Close the airport popup when the user leaves the airspace tab —
+  // airports only render with mode === null and a popup hovering over an
+  // unmounted layer is disorienting.
+  useEffect(() => {
+    if (mode !== null && popupAirportIata) setPopupAirportIata(null);
+  }, [mode, popupAirportIata]);
+
   return (
     <>
     {routeShapesLoading && mode !== null && <MapLoadingBadge mode={mode} />}
@@ -694,7 +723,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
       initialViewState={NYC_CENTER}
       style={{ width: "100%", height: "100%" }}
       mapStyle={BASEMAP}
-      interactiveLayerIds={["train-markers", "aircraft-markers"]}
+      interactiveLayerIds={["train-markers", "aircraft-markers", "airport-dots"]}
       onClick={handleClick}
       onLoad={handleMapLoad}
       cursor="pointer"
@@ -1242,6 +1271,16 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
         <AircraftPopup
           aircraft={popupAircraft}
           onClose={() => setPopupAircraftHex(null)}
+        />
+      )}
+
+      {/* Airport briefing popup — frequencies, runways, elevation. Same
+          react-map-gl Popup pattern as aircraft since airport position is
+          static (no per-frame repositioning needed). */}
+      {popupAirport && (
+        <AirportPopup
+          airport={popupAirport}
+          onClose={() => setPopupAirportIata(null)}
         />
       )}
 

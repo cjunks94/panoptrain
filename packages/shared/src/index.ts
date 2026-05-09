@@ -47,7 +47,7 @@ export type { Mode } from "./constants/feeds.js";
 
 export type { Aircraft, AirspaceResponse } from "./types/airspace.js";
 export { AIRPORTS } from "./constants/airports.js";
-export type { Airport } from "./constants/airports.js";
+export type { Airport, Runway, RunwaySurface, Frequencies } from "./constants/airports.js";
 
 // Schemas
 export { TrainPositionSchema, TrainsResponseSchema } from "./schemas/api.schema.js";
