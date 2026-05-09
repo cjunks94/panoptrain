@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { RoutesGeoJSON } from "@panoptrain/shared";
 import {
   _resetTrackCachesForTests,
@@ -40,6 +40,12 @@ beforeEach(() => {
     return 0;
   }) as unknown as typeof setTimeout);
   _resetTrackCachesForTests();
+});
+
+// Restore real timers so later tests in the same worker don't inherit
+// the synchronous setTimeout stub (vitest reuses workers across files).
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("prewarmTrackCaches", () => {
