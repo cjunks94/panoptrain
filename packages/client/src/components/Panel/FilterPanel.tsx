@@ -1,5 +1,6 @@
 import { routeGroupsForMode } from "@panoptrain/shared";
 import type {
+  MetarReport,
   Mode,
   StopsGeoJSON,
   TripPlan,
@@ -10,6 +11,7 @@ import { LineToggle } from "./LineToggle.js";
 import { TripPlanner } from "./TripPlanner.js";
 import { LirrTripPlanner } from "./LirrTripPlanner.js";
 import { ModeTabs } from "./ModeTabs.js";
+import { AirportDirectory } from "./AirportDirectory.js";
 import { StatusBadge } from "../Layout/StatusBadge.js";
 import { useIsMobile } from "../../hooks/useIsMobile.js";
 import type { View } from "../../hooks/useView.js";
@@ -36,6 +38,15 @@ interface FilterPanelProps {
   onPlanFound?: (plan: TripPlan | LirrTripPlan | null) => void;
   /** Aircraft snapshot count — surfaced as the airspace view's status. */
   aircraftCount: number;
+  /** METAR observations keyed by ICAO. The airport directory uses these
+   *  to render a flight-category badge per airport. */
+  metarReports: Record<string, MetarReport>;
+  /** ICAO of the currently popped airport, if any. The directory
+   *  highlights the matching row so the panel mirrors map state. */
+  activeAirportIata: string | null;
+  /** Called when the user picks an airport from the directory. Wired
+   *  through App so the popup opens AND the camera flies to the airport. */
+  onSelectAirport: (iata: string) => void;
 }
 
 export function FilterPanel({
@@ -54,6 +65,9 @@ export function FilterPanel({
   liveTrains,
   onPlanFound,
   aircraftCount,
+  metarReports,
+  activeAirportIata,
+  onSelectAirport,
 }: FilterPanelProps) {
   const isMobile = useIsMobile();
   const isAirspace = view === "airspace";
@@ -227,42 +241,75 @@ export function FilterPanel({
             </div>
           </>
         ) : (
-          <AirspacePanelBody count={aircraftCount} />
+          <AirspacePanelBody
+            count={aircraftCount}
+            metarReports={metarReports}
+            activeAirportIata={activeAirportIata}
+            onSelectAirport={onSelectAirport}
+          />
         )}
       </div>
     </>
   );
 }
 
-/** Body shown when the airspace tab is active. The aircraft layer is always
- *  on while this view is selected, so there are no per-aircraft filters
- *  yet — just guidance, count, and the ODbL attribution (required when
- *  the data is being displayed). */
-function AirspacePanelBody({ count }: { count: number }) {
+/** Body shown when the airspace tab is active. Replaces the previous
+ *  prose-and-count placeholder with a clickable airport directory so a
+ *  pilot can pick a field directly instead of hunting for its dot on
+ *  the map. The aircraft count + ODbL attribution stay below the
+ *  directory — aircraft layer is always on with this view selected,
+ *  so there are no per-aircraft filters yet. */
+function AirspacePanelBody({
+  count,
+  metarReports,
+  activeAirportIata,
+  onSelectAirport,
+}: {
+  count: number;
+  metarReports: Record<string, MetarReport>;
+  activeAirportIata: string | null;
+  onSelectAirport: (iata: string) => void;
+}) {
   return (
-    <div style={{ flex: 1, overflowY: "auto", padding: "16px" }}>
-      <p style={{ color: "#cbd5e1", fontSize: 13, lineHeight: 1.5, margin: 0 }}>
-        Live aircraft within ~40&nbsp;nm of NYC. Click a plane to see its
-        callsign, altitude, ground speed, and heading.
-      </p>
-      <p style={{ color: "#94a3b8", fontSize: 12, lineHeight: 1.5, marginTop: 12 }}>
-        {count > 0
-          ? `Tracking ${count} aircraft.`
-          : "No aircraft in view yet — data refreshes every 8s."}
-      </p>
-      <div style={{ fontSize: 10, color: "#64748b", marginTop: 16, lineHeight: 1.4 }}>
-        Aircraft data:{" "}
-        <a
-          href="https://adsb.lol"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ color: "#94a3b8", textDecoration: "underline" }}
-        >
-          adsb.lol
-        </a>
-        {" "}(ODbL)
+    <>
+      <AirportDirectory
+        metarReports={metarReports}
+        activeIata={activeAirportIata}
+        onSelect={onSelectAirport}
+      />
+      <div
+        style={{
+          padding: "8px 16px 12px",
+          borderTop: "1px solid rgba(255,255,255,0.08)",
+        }}
+      >
+        <div style={{ color: "#94a3b8", fontSize: 11, lineHeight: 1.4 }}>
+          {count > 0
+            ? `${count} aircraft in view · refreshes every 8s.`
+            : "No aircraft in view yet — refreshes every 8s."}
+        </div>
+        <div style={{ fontSize: 10, color: "#64748b", marginTop: 6, lineHeight: 1.4 }}>
+          Aircraft:{" "}
+          <a
+            href="https://adsb.lol"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: "#94a3b8", textDecoration: "underline" }}
+          >
+            adsb.lol
+          </a>{" "}
+          (ODbL) · Weather:{" "}
+          <a
+            href="https://aviationweather.gov"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: "#94a3b8", textDecoration: "underline" }}
+          >
+            aviationweather.gov
+          </a>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 

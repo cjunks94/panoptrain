@@ -211,6 +211,17 @@ interface TransitMapProps {
    *  tab or before the first poll lands; the popup renders its other rows
    *  unchanged in that case. */
   metarReports: Record<string, MetarReport>;
+  /** Lifted to App so the panel directory and the map both drive the
+   *  same popup. Map clicks call onPopupAirportIataChange directly;
+   *  panel clicks go through App's handleSelectAirport which also
+   *  issues a flyToToken. */
+  popupAirportIata: string | null;
+  onPopupAirportIataChange: (iata: string | null) => void;
+  /** Bumped by App whenever the user picks an airport from the panel
+   *  directory. The nonce changes on each click (Date.now()) so the
+   *  effect fires even when the same iata is re-clicked. Map-clicks
+   *  on visible dots leave this null so the camera doesn't yank. */
+  flyToToken: { iata: string; nonce: number } | null;
 }
 
 /** Popup placement constants. The popup sits perpendicular to the train's
@@ -224,12 +235,15 @@ const POPUP_OFFSET_PX = 120;
  *  position so map curvature doesn't matter. */
 const POPUP_AHEAD_DEG = 0.001;
 
-export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, stops, planRoute, planRouteIds, mode, panelOpen, routeShapesLoading, aircraft, metarReports }: TransitMapProps) {
+export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, stops, planRoute, planRouteIds, mode, panelOpen, routeShapesLoading, aircraft, metarReports, popupAirportIata, onPopupAirportIataChange, flyToToken }: TransitMapProps) {
   const [popupTripId, setPopupTripId] = useState<string | null>(null);
   const [iconsReady, setIconsReady] = useState(false);
   const [followTripId, setFollowTripId] = useState<string | null>(null);
   const [popupAircraftHex, setPopupAircraftHex] = useState<string | null>(null);
-  const [popupAirportIata, setPopupAirportIata] = useState<string | null>(null);
+  // Airport popup state is owned by App so the panel directory can open
+  // the same popup. Use a local alias so the replace-everywhere below
+  // keeps reading naturally.
+  const setPopupAirportIata = onPopupAirportIataChange;
   const mapRef = useRef<MapRef>(null);
   const popupOverlayRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
@@ -731,6 +745,25 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
   useEffect(() => {
     if (popupAircraftHex && !popupAircraft) setPopupAircraftHex(null);
   }, [popupAircraftHex, popupAircraft]);
+
+  // Pan to an airport when the user picks it from the panel directory.
+  // Map-clicks on airport dots leave flyToToken null so the camera
+  // doesn't yank under the user's cursor — only deliberate panel
+  // selections trigger the flight. Zoom 12 keeps surrounding context
+  // visible (other airports, NYC outline) instead of zooming so far
+  // in that the user loses their bearings.
+  useEffect(() => {
+    if (!flyToToken) return;
+    const airport = AIRPORTS.find((a) => a.iata === flyToToken.iata);
+    if (!airport) return;
+    const map = mapRef.current?.getMap();
+    if (!map) return;
+    map.flyTo({
+      center: [airport.longitude, airport.latitude],
+      zoom: Math.max(map.getZoom(), 12),
+      duration: 800,
+    });
+  }, [flyToToken]);
 
   // Close train-only state when entering the airspace tab, and the
   // airport popup when leaving it. Without the airspace clear the RAF
