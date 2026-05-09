@@ -3,6 +3,7 @@ import Map, { Source, Layer } from "react-map-gl/maplibre";
 import type { MapLayerMouseEvent, MapRef } from "react-map-gl/maplibre";
 import type {
   Aircraft,
+  MetarReport,
   Mode,
   RoutesGeoJSON,
   StopsGeoJSON,
@@ -206,6 +207,10 @@ interface TransitMapProps {
    *  overlay is toggled off, so the layer can mount unconditionally and
    *  the only branch is data presence. */
   aircraft: Aircraft[];
+  /** Current METAR observations keyed by ICAO. Empty when off the airspace
+   *  tab or before the first poll lands; the popup renders its other rows
+   *  unchanged in that case. */
+  metarReports: Record<string, MetarReport>;
 }
 
 /** Popup placement constants. The popup sits perpendicular to the train's
@@ -219,7 +224,7 @@ const POPUP_OFFSET_PX = 120;
  *  position so map curvature doesn't matter. */
 const POPUP_AHEAD_DEG = 0.001;
 
-export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, stops, planRoute, planRouteIds, mode, panelOpen, routeShapesLoading, aircraft }: TransitMapProps) {
+export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, stops, planRoute, planRouteIds, mode, panelOpen, routeShapesLoading, aircraft, metarReports }: TransitMapProps) {
   const [popupTripId, setPopupTripId] = useState<string | null>(null);
   const [iconsReady, setIconsReady] = useState(false);
   const [followTripId, setFollowTripId] = useState<string | null>(null);
@@ -1310,6 +1315,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
       {popupAirport && (
         <AirportPopup
           airport={popupAirport}
+          metar={metarReports[popupAirport.icao] ?? null}
           onClose={() => setPopupAirportIata(null)}
         />
       )}

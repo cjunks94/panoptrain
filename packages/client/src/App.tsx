@@ -10,6 +10,7 @@ import { useRouteShapes } from "./hooks/useRouteShapes.js";
 import { useLineFilter } from "./hooks/useLineFilter.js";
 import { useView, transitModeFor } from "./hooks/useView.js";
 import { useAircraftPositions } from "./hooks/useAircraftPositions.js";
+import { useMetars } from "./hooks/useMetars.js";
 import { MOBILE_QUERY } from "./hooks/useIsMobile.js";
 
 export default function App() {
@@ -30,6 +31,9 @@ export default function App() {
   const { routeShapes, stopsGeoJson, loading: routeShapesLoading } = useRouteShapes(transitMode);
   const { visibleRoutes, toggleRoute, toggleGroup, allOn, allOff } = useLineFilter(lineFilterMode);
   const { aircraft } = useAircraftPositions(view === "airspace");
+  // METAR feed only matters when the user can open an airport popup,
+  // which only happens on the airspace tab. Same gate as aircraft.
+  const { reports: metarReports } = useMetars(view === "airspace");
   // Default closed on mobile so the bottom sheet doesn't take up 75vh on
   // first paint — users land on the map, then tap to filter. Desktop keeps
   // the sidebar open by default since it doesn't cover the map. One-shot
@@ -83,6 +87,7 @@ export default function App() {
         panelOpen={panelOpen}
         routeShapesLoading={routeShapesLoading}
         aircraft={aircraft}
+        metarReports={metarReports}
       />
       <FilterPanel
         open={panelOpen}

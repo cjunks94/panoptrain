@@ -1,17 +1,22 @@
 import type { ReactNode } from "react";
 import { Popup } from "react-map-gl/maplibre";
-import type { Airport, Frequencies, Runway } from "@panoptrain/shared";
+import type { Airport, FlightCategory, Frequencies, MetarReport, Runway } from "@panoptrain/shared";
 
-/** Click-to-inspect airport briefing — frequencies + runways + elevation,
- *  the same set a pilot looks up in the FAA Chart Supplement. Mirrors
+/** Click-to-inspect airport briefing — frequencies + runways + elevation
+ *  + current METAR weather. The same set a pilot looks up in the FAA
+ *  Chart Supplement plus a glance-able weather row. Mirrors
  *  AircraftPopup's react-map-gl Popup pattern (airport position is static
  *  so no per-frame DOM repositioning needed). */
 interface AirportPopupProps {
   airport: Airport;
+  /** Current METAR observation, null if no report available (poller cold,
+   *  ASOS outage, etc.). The popup omits the weather section entirely
+   *  rather than rendering empty rows. */
+  metar: MetarReport | null;
   onClose: () => void;
 }
 
-export function AirportPopup({ airport, onClose }: AirportPopupProps) {
+export function AirportPopup({ airport, metar, onClose }: AirportPopupProps) {
   return (
     <Popup
       className="airport-popup"
@@ -36,8 +41,9 @@ export function AirportPopup({ airport, onClose }: AirportPopupProps) {
           border: "1px solid rgba(148, 163, 184, 0.3)",
         }}
       >
-        <Header airport={airport} onClose={onClose} />
+        <Header airport={airport} metar={metar} onClose={onClose} />
         <StatsLine airport={airport} />
+        {metar && <MetarSection metar={metar} />}
         <FrequenciesSection frequencies={airport.frequencies} />
         <RunwaysSection runways={airport.runways} />
       </div>
@@ -58,13 +64,16 @@ export function AirportPopup({ airport, onClose }: AirportPopupProps) {
   );
 }
 
-function Header({ airport, onClose }: { airport: Airport; onClose: () => void }) {
+function Header({ airport, metar, onClose }: { airport: Airport; metar: MetarReport | null; onClose: () => void }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
       <div>
         {/* IATA is the recognizable handle ("JFK"); ICAO and full name are
             the formal identification underneath. */}
-        <div style={{ fontSize: 18, fontWeight: 700, color: "#fff", lineHeight: 1.1 }}>{airport.iata}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#fff", lineHeight: 1.1 }}>{airport.iata}</div>
+          {metar?.flightCategory && <FlightCategoryBadge category={metar.flightCategory} />}
+        </div>
         <div style={{ color: "#cbd5e1", fontSize: 12 }}>{airport.name}</div>
       </div>
       <button
@@ -188,5 +197,83 @@ function Row({ label, value }: { label: string; value: string }) {
       <span style={{ color: "#94a3b8" }}>{label}</span>
       <span style={{ color: "#e2e8f0", fontVariantNumeric: "tabular-nums" }}>{value}</span>
     </>
+  );
+}
+
+/** FAA flight category color convention used by every flight-display in
+ *  US aviation — green/blue/red/magenta. Matching this (rather than
+ *  picking app-theme colors) so pilots get instant recognition. */
+const FLIGHT_CATEGORY_COLOR: Record<FlightCategory, string> = {
+  VFR: "#22c55e",   // green
+  MVFR: "#3b82f6",  // blue
+  IFR: "#ef4444",   // red
+  LIFR: "#d946ef",  // magenta
+};
+
+function FlightCategoryBadge({ category }: { category: FlightCategory }) {
+  return (
+    <span
+      style={{
+        background: FLIGHT_CATEGORY_COLOR[category],
+        color: "#0a0a1a",
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: "0.04em",
+        padding: "2px 6px",
+        borderRadius: 3,
+        lineHeight: 1,
+      }}
+    >
+      {category}
+    </span>
+  );
+}
+
+function MetarSection({ metar }: { metar: MetarReport }) {
+  const rows: Array<[string, string]> = [];
+  if (metar.wind) {
+    if (metar.wind.speedKt === 0) {
+      // METAR "00000KT" = calm wind. Direction is meaningless when speed
+      // is zero; aviation convention is to just say "Calm".
+      rows.push(["Wind", "Calm"]);
+    } else {
+      const dir = metar.wind.directionDeg === null
+        ? "VRB"
+        : `${String(metar.wind.directionDeg).padStart(3, "0")}°`;
+      const gust = metar.wind.gustKt !== null ? `G${metar.wind.gustKt}` : "";
+      rows.push(["Wind", `${dir} @ ${metar.wind.speedKt}${gust} kt`]);
+    }
+  }
+  if (metar.visibilitySm !== null) {
+    rows.push(["Visibility", `${metar.visibilitySm} sm`]);
+  }
+  if (metar.ceilingFt !== null) {
+    rows.push(["Ceiling", `${metar.ceilingFt.toLocaleString("en-US")} ft`]);
+  }
+  if (metar.tempC !== null) {
+    const dew = metar.dewpointC !== null ? ` / ${Math.round(metar.dewpointC)}` : "";
+    rows.push(["Temp / Dew", `${Math.round(metar.tempC)}${dew} °C`]);
+  }
+  if (metar.altimeterInHg !== null) {
+    rows.push(["Altimeter", `${metar.altimeterInHg.toFixed(2)} inHg`]);
+  }
+  if (rows.length === 0) return null;
+
+  // Observed-at relative time gives "as-of" without making the popup
+  // recompute on every render. The observation is at most an hour old
+  // and the user opens popups for seconds at a time, so a snapshot of
+  // "X minutes ago" at render time is accurate enough.
+  const ageMin = Math.max(0, Math.round((Date.now() - metar.observedAt) / 60_000));
+  const observedLabel = ageMin === 0 ? "just now" : `${ageMin} min ago`;
+
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <SectionLabel>Weather · {observedLabel}</SectionLabel>
+      <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "2px 10px" }}>
+        {rows.map(([label, value]) => (
+          <Row key={label} label={label} value={value} />
+        ))}
+      </div>
+    </div>
   );
 }
