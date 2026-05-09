@@ -304,7 +304,17 @@ export function FilterPanel({
               </button>
             </div>
 
-            <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "8px 0",
+                // Same theme-matched thin scrollbar as the airport
+                // directory — the OS default fights the dark panel.
+                scrollbarWidth: "thin",
+                scrollbarColor: "rgba(148, 163, 184, 0.35) transparent",
+              }}
+            >
               {routeGroupsForMode(transitMode).map((group) => {
                 const allVisible = group.routes.every((r) => visibleRoutes.has(r));
                 const someVisible = group.routes.some((r) => visibleRoutes.has(r));
