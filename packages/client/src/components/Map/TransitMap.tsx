@@ -647,12 +647,23 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
         }
         return;
       }
-      if (layerId === "airport-dots") {
+      // At airspace zoom 13+ the label is usually the click target, not
+      // the dot — both label layers carry the same iata so accept any of
+      // the three.
+      if (
+        layerId === "airport-dots" ||
+        layerId === "airport-labels-code" ||
+        layerId === "airport-labels-detail"
+      ) {
         const iata = feature.properties.iata as string | undefined;
         if (iata) {
           setPopupAirportIata(iata);
           setPopupAircraftHex(null);
           setPopupTripId(null);
+          // Clear any active train follow — the RAF loop would otherwise
+          // keep recentering on the followed train and yank the camera
+          // away from the airport the user just clicked.
+          setFollowTripId(null);
         }
         return;
       }
@@ -708,11 +719,17 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     if (popupAircraftHex && !popupAircraft) setPopupAircraftHex(null);
   }, [popupAircraftHex, popupAircraft]);
 
-  // Close the airport popup when the user leaves the airspace tab —
-  // airports only render with mode === null and a popup hovering over an
-  // unmounted layer is disorienting.
+  // Close train-only state when entering the airspace tab, and the
+  // airport popup when leaving it. Without the airspace clear the RAF
+  // loop would keep recentering on a followed train (whose layer has
+  // unmounted), and a stale train popup would float over empty space.
   useEffect(() => {
-    if (mode !== null && popupAirportIata) setPopupAirportIata(null);
+    if (mode === null) {
+      setFollowTripId(null);
+      setPopupTripId(null);
+      return;
+    }
+    if (popupAirportIata) setPopupAirportIata(null);
   }, [mode, popupAirportIata]);
 
   return (
@@ -723,7 +740,13 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
       initialViewState={NYC_CENTER}
       style={{ width: "100%", height: "100%" }}
       mapStyle={BASEMAP}
-      interactiveLayerIds={["train-markers", "aircraft-markers", "airport-dots"]}
+      interactiveLayerIds={[
+        "train-markers",
+        "aircraft-markers",
+        "airport-dots",
+        "airport-labels-code",
+        "airport-labels-detail",
+      ]}
       onClick={handleClick}
       onLoad={handleMapLoad}
       cursor="pointer"
