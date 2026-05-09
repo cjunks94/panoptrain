@@ -7,6 +7,7 @@ cd "$(dirname "$0")"
 
 MTA="https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds"
 ADSB="https://api.adsb.lol/v2/lat/40.75/lon/-73.97/dist/40"
+AWX_METAR="https://aviationweather.gov/api/data/metar?ids=KJFK,KLGA,KEWR,KHPN,KISP,KTEB,KSWF,KFRG,KFOK,KCDW,KMMU&format=json"
 TIMEOUT=15
 
 # Track each background PID so we can wait on them individually and fail
@@ -23,6 +24,7 @@ curl -sf -o mta-gtfs-g.pb      "$MTA/nyct%2Fgtfs-g"      --max-time "$TIMEOUT" &
 curl -sf -o mta-gtfs-si.pb     "$MTA/nyct%2Fgtfs-si"     --max-time "$TIMEOUT" & pids+=($!)
 curl -sf -o mta-gtfs-lirr.pb   "$MTA/lirr%2Fgtfs-lirr"   --max-time "$TIMEOUT" & pids+=($!)
 curl -sf -o adsb-aircraft.json "$ADSB"                   --max-time "$TIMEOUT" & pids+=($!)
+curl -sf -o aviationweather-metar.json "$AWX_METAR"      --max-time "$TIMEOUT" & pids+=($!)
 
 failed=0
 for pid in "${pids[@]}"; do

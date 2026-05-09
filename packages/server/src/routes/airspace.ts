@@ -1,6 +1,7 @@
 import { Hono } from "hono";
-import type { AirspaceResponse } from "@panoptrain/shared";
+import type { AirspaceResponse, MetarsResponse } from "@panoptrain/shared";
 import { getCurrentAirspaceSnapshot } from "../services/airspace-poller.js";
+import { getCurrentMetarSnapshot } from "../services/metar-poller.js";
 
 const airspace = new Hono();
 
@@ -24,6 +25,22 @@ airspace.get("/aircraft", (c) => {
     aircraft: snap.aircraft,
     source: snap.source,
   } satisfies AirspaceResponse);
+});
+
+airspace.get("/metar", (c) => {
+  const snap = getCurrentMetarSnapshot();
+  if (!snap) {
+    return c.json(
+      { error: "METAR data not available — poller has not produced a snapshot yet" },
+      503,
+    );
+  }
+  // 60s of intermediary cache headroom — METARs only update hourly so
+  // a longer max-age would be safe, but the poller's own state is
+  // server-process-local and the popup is the only consumer; tighter
+  // cache means fresher reads when the poller refreshes.
+  c.header("Cache-Control", "public, max-age=60");
+  return c.json(snap satisfies MetarsResponse);
 });
 
 export default airspace;

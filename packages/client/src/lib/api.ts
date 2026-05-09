@@ -6,6 +6,7 @@ import type {
   PlanResponse,
   LirrPlanResponse,
   AirspaceResponse,
+  MetarsResponse,
 } from "@panoptrain/shared";
 
 async function fetchJson<T>(path: string): Promise<T> {
@@ -55,4 +56,10 @@ export function fetchLirrPlan(
  *  cadence; the client just consumes the latest snapshot. */
 export function fetchAirspaceAircraft(): Promise<AirspaceResponse> {
   return fetchJson<AirspaceResponse>("/airspace/aircraft");
+}
+
+/** Current METAR observations for every NYC-metro airport. Bulk endpoint
+ *  — small payload (~5KB for 11 airports) and the popup looks up by ICAO. */
+export function fetchMetars(): Promise<MetarsResponse> {
+  return fetchJson<MetarsResponse>("/airspace/metar");
 }

@@ -54,6 +54,12 @@ const handlers = [
   http.get("https://api.adsb.lol/v2/lat/40.75/lon/-73.97/dist/40", () =>
     HttpResponse.json(jsonFixture("adsb-aircraft.json")),
   ),
+  // METAR endpoint accepts a comma-separated `ids` query; match by path
+  // and ignore the specific ICAO list since the captured fixture covers
+  // every airport in AIRPORTS and the poller always asks for all of them.
+  http.get("https://aviationweather.gov/api/data/metar", () =>
+    HttpResponse.json(jsonFixture("aviationweather-metar.json")),
+  ),
 ];
 
 export const e2eServer = setupServer(...handlers);

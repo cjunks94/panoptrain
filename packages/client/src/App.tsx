@@ -10,6 +10,7 @@ import { useRouteShapes } from "./hooks/useRouteShapes.js";
 import { useLineFilter } from "./hooks/useLineFilter.js";
 import { useView, transitModeFor } from "./hooks/useView.js";
 import { useAircraftPositions } from "./hooks/useAircraftPositions.js";
+import { useMetars } from "./hooks/useMetars.js";
 import { MOBILE_QUERY } from "./hooks/useIsMobile.js";
 
 export default function App() {
@@ -30,6 +31,23 @@ export default function App() {
   const { routeShapes, stopsGeoJson, loading: routeShapesLoading } = useRouteShapes(transitMode);
   const { visibleRoutes, toggleRoute, toggleGroup, allOn, allOff } = useLineFilter(lineFilterMode);
   const { aircraft } = useAircraftPositions(view === "airspace");
+  // METAR feed only matters when the user can open an airport popup,
+  // which only happens on the airspace tab. Same gate as aircraft.
+  const { reports: metarReports } = useMetars(view === "airspace");
+
+  // Airport popup state lives at App so the directory in FilterPanel can
+  // open the same popup as a map-click would. Token-based fly-to so the
+  // directory click pans the camera to the airport while a map-click on
+  // a visible dot leaves the camera alone.
+  const [popupAirportIata, setPopupAirportIata] = useState<string | null>(null);
+  const [flyToToken, setFlyToToken] = useState<{ iata: string; nonce: number } | null>(null);
+  const handleSelectAirport = useCallback((iata: string) => {
+    setPopupAirportIata(iata);
+    // Date.now() makes each click a fresh token even if the user re-clicks
+    // the same airport — the effect-watch on the TransitMap side fires
+    // every time, so re-clicking re-centers if the user has panned away.
+    setFlyToToken({ iata, nonce: Date.now() });
+  }, []);
   // Default closed on mobile so the bottom sheet doesn't take up 75vh on
   // first paint — users land on the map, then tap to filter. Desktop keeps
   // the sidebar open by default since it doesn't cover the map. One-shot
@@ -83,6 +101,10 @@ export default function App() {
         panelOpen={panelOpen}
         routeShapesLoading={routeShapesLoading}
         aircraft={aircraft}
+        metarReports={metarReports}
+        popupAirportIata={popupAirportIata}
+        onPopupAirportIataChange={setPopupAirportIata}
+        flyToToken={flyToToken}
       />
       <FilterPanel
         open={panelOpen}
@@ -102,6 +124,9 @@ export default function App() {
         liveTrains={data?.trains ?? []}
         onPlanFound={setPlanRoute}
         aircraftCount={aircraft.length}
+        metarReports={metarReports}
+        activeAirportIata={popupAirportIata}
+        onSelectAirport={handleSelectAirport}
       />
     </AppShell>
   );
