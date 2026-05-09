@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { Mode, TrainsResponse } from "@panoptrain/shared";
 import { fetchTrains } from "../lib/api.js";
+import { getLastTrains, setLastTrains } from "../lib/modeCache.js";
 
 // Injected by vite.config.ts from the repo-root POLL_INTERVAL_MS env var so
 // this stays in lockstep with the server's polling cadence.
@@ -26,14 +27,28 @@ export function useTrainPositions(mode: Mode | null): UseTrainPositionsResult {
   // is mid-flight would briefly flash subway trains in the LIRR view.
   const modeRef = useRef<Mode | null>(mode);
 
-  // Clear stale data when the mode flips (or unloads, e.g. switching to
-  // the airspace view) so we don't briefly show old trains while the new
-  // mode's fetch is in flight.
+  // On mode flip: hydrate from the cache if we have a prior poll for the
+  // new mode (so the user sees the last-known trains instantly while a
+  // fresh poll lands in the background), otherwise clear so we don't
+  // briefly show the previous mode's trains. Airspace clears unconditionally.
   useEffect(() => {
     modeRef.current = mode;
-    setData(null);
-    setLastUpdated(null);
-    setIsStale(false);
+    if (mode === null) {
+      setData(null);
+      setLastUpdated(null);
+      setIsStale(false);
+      return;
+    }
+    const cached = getLastTrains(mode);
+    if (cached) {
+      setData(cached.data);
+      setLastUpdated(cached.fetchedAt);
+      setIsStale(false);
+    } else {
+      setData(null);
+      setLastUpdated(null);
+      setIsStale(false);
+    }
   }, [mode]);
 
   const poll = useCallback(async () => {
@@ -42,6 +57,7 @@ export function useTrainPositions(mode: Mode | null): UseTrainPositionsResult {
     try {
       const result = await fetchTrains(requested);
       if (modeRef.current !== requested) return; // mode flipped mid-flight
+      setLastTrains(requested, result);
       setData(result);
       setLastUpdated(Date.now());
       setIsStale(false);

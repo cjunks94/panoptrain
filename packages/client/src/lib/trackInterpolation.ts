@@ -73,11 +73,20 @@ function cachedBestShape(
   return { shape: result, tooFar: bestDist > 0.5 };
 }
 
+// Memoize the most recent (routes → index) pair. On tab-switch the same
+// cached routes object is handed back through useRouteShapes; without this
+// every re-mount would rebuild the index AND clear the warmed snap caches,
+// which is the bottleneck behind the LIRR tab-switch hitch.
+let lastIndexedRoutes: RoutesGeoJSON | undefined;
+let lastIndex: Record<string, ShapeData[]> | undefined;
+
 /**
  * Index route shapes by routeId for quick lookup.
  * Each route may have multiple shapes (directions/branches).
  */
 export function buildShapeIndex(routes: RoutesGeoJSON): Record<string, ShapeData[]> {
+  if (routes === lastIndexedRoutes && lastIndex) return lastIndex;
+
   const index: Record<string, ShapeData[]> = {};
   let shapeId = 0;
   for (const feature of routes.features) {
@@ -95,6 +104,8 @@ export function buildShapeIndex(routes: RoutesGeoJSON): Record<string, ShapeData
   // hundreds of trains all hit cold caches and stall the main thread on Turf
   // nearestPointOnLine. Idle scheduling keeps it off the first-paint path.
   scheduleIdle(() => prewarmTrackCaches(index));
+  lastIndexedRoutes = routes;
+  lastIndex = index;
   return index;
 }
 
