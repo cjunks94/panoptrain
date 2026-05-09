@@ -42,6 +42,17 @@ const AIRPORTS_GEOJSON: GeoJSON.FeatureCollection = {
     },
   })),
 };
+
+// All airport layer IDs that should open the popup on click. Listed in
+// one place so the click-handler dispatch and `interactiveLayerIds`
+// can't drift when layers are added or renamed. The label layers are
+// included because at zoom 13+ the label is the visual click target.
+const AIRPORT_LAYER_IDS = [
+  "airport-dots",
+  "airport-labels-code",
+  "airport-labels-detail",
+] as const;
+
 // 30fps. Higher than the previous 15fps because the dirty-flag guard in
 // interpolateFrame means we no longer pay the per-frame setData() cost
 // during the idle gap between polls — only during the ~30s of active
@@ -647,12 +658,20 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
         }
         return;
       }
-      if (layerId === "airport-dots") {
+      // At airspace zoom 13+ the label is usually the click target, not
+      // the dot — all three layers carry the same iata so any hit
+      // dispatches identically. Membership check against the shared
+      // AIRPORT_LAYER_IDS list keeps this in sync with interactiveLayerIds.
+      if (layerId && (AIRPORT_LAYER_IDS as readonly string[]).includes(layerId)) {
         const iata = feature.properties.iata as string | undefined;
         if (iata) {
           setPopupAirportIata(iata);
           setPopupAircraftHex(null);
           setPopupTripId(null);
+          // Clear any active train follow — the RAF loop would otherwise
+          // keep recentering on the followed train and yank the camera
+          // away from the airport the user just clicked.
+          setFollowTripId(null);
         }
         return;
       }
@@ -708,11 +727,17 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     if (popupAircraftHex && !popupAircraft) setPopupAircraftHex(null);
   }, [popupAircraftHex, popupAircraft]);
 
-  // Close the airport popup when the user leaves the airspace tab —
-  // airports only render with mode === null and a popup hovering over an
-  // unmounted layer is disorienting.
+  // Close train-only state when entering the airspace tab, and the
+  // airport popup when leaving it. Without the airspace clear the RAF
+  // loop would keep recentering on a followed train (whose layer has
+  // unmounted), and a stale train popup would float over empty space.
   useEffect(() => {
-    if (mode !== null && popupAirportIata) setPopupAirportIata(null);
+    if (mode === null) {
+      setFollowTripId(null);
+      setPopupTripId(null);
+      return;
+    }
+    if (popupAirportIata) setPopupAirportIata(null);
   }, [mode, popupAirportIata]);
 
   return (
@@ -723,7 +748,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
       initialViewState={NYC_CENTER}
       style={{ width: "100%", height: "100%" }}
       mapStyle={BASEMAP}
-      interactiveLayerIds={["train-markers", "aircraft-markers", "airport-dots"]}
+      interactiveLayerIds={["train-markers", "aircraft-markers", ...AIRPORT_LAYER_IDS]}
       onClick={handleClick}
       onLoad={handleMapLoad}
       cursor="pointer"
