@@ -83,10 +83,10 @@ jobs:
             pnpm download-gtfs:lirr
           fi
 
-      - name: Resolve Playwright version
+      - name: Resolve installed Playwright version
         id: playwright-version
         run: |
-          version=$(node -p "require('./packages/e2e/package.json').devDependencies['@playwright/test'].replace(/^[\^~]/, '')")
+          version=$(pnpm --filter @panoptrain/e2e exec node -p "require('@playwright/test/package.json').version")
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Cache Playwright browsers
