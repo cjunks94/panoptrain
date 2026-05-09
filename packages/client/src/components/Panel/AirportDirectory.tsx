@@ -35,7 +35,19 @@ const FLIGHT_CATEGORY_COLOR: Record<FlightCategory, string> = {
 
 export function AirportDirectory({ metarReports, activeIata, onSelect }: AirportDirectoryProps) {
   return (
-    <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
+    // scrollbarWidth + scrollbarColor render a thin, theme-matched
+    // scrollbar instead of the OS default — the chunky white Windows
+    // scrollbar fights the dark panel chrome and visually shrinks the
+    // tap area for the airport rows.
+    <div
+      style={{
+        flex: 1,
+        overflowY: "auto",
+        padding: "8px 0",
+        scrollbarWidth: "thin",
+        scrollbarColor: "rgba(148, 163, 184, 0.35) transparent",
+      }}
+    >
       <p style={{ color: "#cbd5e1", fontSize: 12, lineHeight: 1.5, margin: "0 16px 12px" }}>
         Tap an airport for frequencies, runways, and current weather.
       </p>
