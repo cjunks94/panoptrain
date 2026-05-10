@@ -24,6 +24,7 @@ export function AircraftPopup({ aircraft, onClose }: AircraftPopupProps) {
 
   return (
     <Popup
+      className="aircraft-popup"
       longitude={aircraft.longitude}
       latitude={aircraft.latitude}
       anchor="bottom"
@@ -75,13 +76,18 @@ export function AircraftPopup({ aircraft, onClose }: AircraftPopupProps) {
           />
         )}
       </div>
+      {/* Scoped via the .aircraft-popup className on the Popup root so we
+          don't unintentionally restyle other map popups (e.g. airport,
+          train) while this one is open. Mirrors the AirportPopup pattern
+          fixed in PR #40 review — AircraftPopup never got the same
+          treatment until this PR. */}
       <style>{`
-        .maplibregl-popup-content {
+        .aircraft-popup .maplibregl-popup-content {
           background: transparent !important;
           padding: 0 !important;
           box-shadow: none !important;
         }
-        .maplibregl-popup-tip {
+        .aircraft-popup .maplibregl-popup-tip {
           border-top-color: rgba(15, 23, 42, 0.95) !important;
         }
       `}</style>
