@@ -1372,10 +1372,10 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
         />
       )}
 
-      {/* Airport briefing popup — frequencies, runways, elevation. Same
-          react-map-gl Popup pattern as aircraft since airport position is
-          static (no per-frame repositioning needed). */}
-      {popupAirport && (
+      {/* Airport briefing popup — desktop only. On mobile the briefing
+          renders inline at the top of AirportDirectory inside the panel
+          so it doesn't fight the bottom sheet for screen real estate. */}
+      {popupAirport && !isMobile && (
         <AirportPopup
           airport={popupAirport}
           metar={metarReports[popupAirport.icao] ?? null}

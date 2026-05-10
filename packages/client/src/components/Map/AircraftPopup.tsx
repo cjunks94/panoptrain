@@ -52,14 +52,24 @@ export function AircraftPopup({ aircraft, onClose }: AircraftPopupProps) {
             onClick={onClose}
             aria-label="Close"
             style={{
+              // 44×44 hit area meets the project's mobile touch-target
+              // standard (matches TrainPopup); negative margin pulls
+              // the button into the popup's padding so the popup
+              // doesn't grow to accommodate the larger button.
+              minWidth: 44,
+              minHeight: 44,
+              margin: "-8px -12px -8px 0",
+              padding: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
               background: "none",
               border: "none",
               color: "#94a3b8",
               cursor: "pointer",
               fontSize: 16,
               lineHeight: 1,
-              padding: 0,
-              marginLeft: 8,
+              flexShrink: 0,
             }}
           >
             ×

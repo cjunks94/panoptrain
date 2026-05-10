@@ -1,8 +1,9 @@
-import { routeGroupsForMode } from "@panoptrain/shared";
+import { AIRPORTS, routeGroupsForMode } from "@panoptrain/shared";
 import type {
   MetarReport,
   Mode,
   StopsGeoJSON,
+  TafReport,
   TripPlan,
   LirrTripPlan,
   TrainPosition,
@@ -13,6 +14,7 @@ import { TripPlanner } from "./TripPlanner.js";
 import { LirrTripPlanner } from "./LirrTripPlanner.js";
 import { ModeTabs } from "./ModeTabs.js";
 import { AirportDirectory } from "./AirportDirectory.js";
+import { AirportBriefing } from "./AirportBriefing.js";
 import { shouldDismissSwipe } from "../../lib/bottomSheetSwipe.js";
 import { StatusBadge } from "../Layout/StatusBadge.js";
 import { useIsMobile } from "../../hooks/useIsMobile.js";
@@ -43,12 +45,18 @@ interface FilterPanelProps {
   /** METAR observations keyed by ICAO. The airport directory uses these
    *  to render a flight-category badge per airport. */
   metarReports: Record<string, MetarReport>;
+  /** TAF forecasts keyed by ICAO. Surfaced inside the inline mobile
+   *  airport briefing alongside METAR. */
+  tafReports: Record<string, TafReport>;
   /** ICAO of the currently popped airport, if any. The directory
    *  highlights the matching row so the panel mirrors map state. */
   activeAirportIata: string | null;
   /** Called when the user picks an airport from the directory. Wired
    *  through App so the popup opens AND the camera flies to the airport. */
   onSelectAirport: (iata: string) => void;
+  /** Clears the active airport selection. Wired through App so the mobile
+   *  inline briefing's close button can dismiss it from the panel. */
+  onClearAirport: () => void;
 }
 
 export function FilterPanel({
@@ -68,8 +76,10 @@ export function FilterPanel({
   onPlanFound,
   aircraftCount,
   metarReports,
+  tafReports,
   activeAirportIata,
   onSelectAirport,
+  onClearAirport,
 }: FilterPanelProps) {
   const isMobile = useIsMobile();
   const isAirspace = view === "airspace";
@@ -335,8 +345,11 @@ export function FilterPanel({
           <AirspacePanelBody
             count={aircraftCount}
             metarReports={metarReports}
+            tafReports={tafReports}
             activeAirportIata={activeAirportIata}
             onSelectAirport={onSelectAirport}
+            onClearAirport={onClearAirport}
+            isMobile={isMobile}
           />
         )}
       </div>
@@ -353,16 +366,43 @@ export function FilterPanel({
 function AirspacePanelBody({
   count,
   metarReports,
+  tafReports,
   activeAirportIata,
   onSelectAirport,
+  onClearAirport,
+  isMobile,
 }: {
   count: number;
   metarReports: Record<string, MetarReport>;
+  tafReports: Record<string, TafReport>;
   activeAirportIata: string | null;
   onSelectAirport: (iata: string) => void;
+  onClearAirport: () => void;
+  isMobile: boolean;
 }) {
+  // Mobile-only inline briefing — desktop keeps the floating map popup
+  // because it doesn't have the bottom-sheet overlap problem.
+  const activeAirport = activeAirportIata
+    ? AIRPORTS.find((a) => a.iata === activeAirportIata) ?? null
+    : null;
+  const showInlineBriefing = isMobile && activeAirport !== null;
+
   return (
     <>
+      {showInlineBriefing && (
+        // key={iata} forces a fresh mount on each airport switch so
+        // the internal `expanded` state resets to its default (true).
+        // Without this, React reuses the instance across selections
+        // and a previously-collapsed briefing stays collapsed for the
+        // next airport — defeating the "show selection expanded" intent.
+        <AirportBriefing
+          key={activeAirport.iata}
+          airport={activeAirport}
+          metar={metarReports[activeAirport.icao] ?? null}
+          taf={tafReports[activeAirport.icao] ?? null}
+          onClose={onClearAirport}
+        />
+      )}
       <AirportDirectory
         metarReports={metarReports}
         activeIata={activeAirportIata}

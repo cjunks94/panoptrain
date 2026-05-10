@@ -31,7 +31,10 @@ export function AirportPopup({ airport, metar, taf, onClose }: AirportPopupProps
       closeButton={false}
       closeOnClick={false}
       onClose={onClose}
-      maxWidth="320px"
+      // Cap at 320px on big screens; on a 360-wide phone leave a 16px
+      // gutter on each side so the popup doesn't run to the bezel and
+      // the tip can still resolve to its anchor.
+      maxWidth="min(320px, calc(100vw - 32px))"
     >
       <div
         style={{
@@ -39,7 +42,10 @@ export function AirportPopup({ airport, metar, taf, onClose }: AirportPopupProps
           color: "#e2e8f0",
           borderRadius: 6,
           padding: "10px 14px",
-          minWidth: 260,
+          // No minWidth — let content size the popup. On phones the
+          // 260px floor would have the popup overflow horizontally on
+          // narrow viewports; the natural content width (frequencies +
+          // runway lines) is plenty without it.
           fontSize: 12,
           lineHeight: 1.5,
           border: "1px solid rgba(148, 163, 184, 0.3)",
@@ -85,14 +91,24 @@ function Header({ airport, metar, onClose }: { airport: Airport; metar: MetarRep
         onClick={onClose}
         aria-label="Close"
         style={{
+          // 44×44 hit area meets the project's mobile touch-target
+          // standard (matches TrainPopup); negative margin pulls the
+          // button into the popup's padding so the popup doesn't grow
+          // to accommodate the larger button.
+          minWidth: 44,
+          minHeight: 44,
+          margin: "-10px -14px -10px 0",
+          padding: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
           background: "none",
           border: "none",
           color: "#94a3b8",
           cursor: "pointer",
           fontSize: 18,
           lineHeight: 1,
-          padding: 0,
-          marginLeft: 8,
+          flexShrink: 0,
         }}
       >
         ×
@@ -101,7 +117,7 @@ function Header({ airport, metar, onClose }: { airport: Airport; metar: MetarRep
   );
 }
 
-function StatsLine({ airport }: { airport: Airport }) {
+export function StatsLine({ airport }: { airport: Airport }) {
   // ICAO + elevation + runway count on one line — the basic identifier
   // strip a pilot scans first when looking at any airport in a directory.
   const parts = [
@@ -130,7 +146,7 @@ const FREQUENCY_ORDER: Array<[keyof Frequencies, string]> = [
   ["unicom", "UNICOM"],
 ];
 
-function FrequenciesSection({ frequencies }: { frequencies: Frequencies }) {
+export function FrequenciesSection({ frequencies }: { frequencies: Frequencies }) {
   // Skip the section entirely if no frequencies are listed (defensive —
   // every NYC airport has at least one, but the type allows zero).
   const present = FREQUENCY_ORDER.filter(([key]) => frequencies[key] && frequencies[key]!.length > 0);
@@ -148,7 +164,7 @@ function FrequenciesSection({ frequencies }: { frequencies: Frequencies }) {
   );
 }
 
-function RunwaysSection({ runways }: { runways: readonly Runway[] }) {
+export function RunwaysSection({ runways }: { runways: readonly Runway[] }) {
   if (runways.length === 0) return null;
   return (
     <div>
@@ -215,7 +231,7 @@ const FLIGHT_CATEGORY_COLOR: Record<FlightCategory, string> = {
   LIFR: "#d946ef",  // magenta
 };
 
-function FlightCategoryBadge({ category }: { category: FlightCategory }) {
+export function FlightCategoryBadge({ category }: { category: FlightCategory }) {
   return (
     <span
       style={{
@@ -234,7 +250,7 @@ function FlightCategoryBadge({ category }: { category: FlightCategory }) {
   );
 }
 
-function MetarSection({ metar }: { metar: MetarReport }) {
+export function MetarSection({ metar }: { metar: MetarReport }) {
   const rows: Array<[string, string]> = [];
   if (metar.wind) {
     if (metar.wind.speedKt === 0) {
@@ -283,7 +299,7 @@ function MetarSection({ metar }: { metar: MetarReport }) {
   );
 }
 
-function TafSection({ taf }: { taf: TafReport }) {
+export function TafSection({ taf }: { taf: TafReport }) {
   // Pin "now" via lazy useState init so toggling expand/collapse can't
   // drift the active period across an FM boundary mid-session. The
   // earlier inline `Date.now()` recomputed on every render — including

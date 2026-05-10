@@ -50,6 +50,7 @@ export default function App() {
     // every time, so re-clicking re-centers if the user has panned away.
     setFlyToToken({ iata, nonce: Date.now() });
   }, []);
+  const handleClearAirport = useCallback(() => setPopupAirportIata(null), []);
   // Default closed on mobile so the bottom sheet doesn't take up 75vh on
   // first paint — users land on the map, then tap to filter. Desktop keeps
   // the sidebar open by default since it doesn't cover the map. One-shot
@@ -59,6 +60,17 @@ export default function App() {
     if (typeof window === "undefined") return true;
     return !window.matchMedia(MOBILE_QUERY).matches;
   });
+  // On mobile the airport briefing renders inside the panel, so any
+  // path that selects an airport (map-click or directory pick) must
+  // also open the panel — otherwise the briefing hides behind a
+  // collapsed bottom sheet. Effect rather than wiring into both
+  // selection paths so map-click on an airport dot is covered too
+  // (TransitMap calls setPopupAirportIata directly via the prop).
+  useEffect(() => {
+    if (popupAirportIata && typeof window !== "undefined" && window.matchMedia(MOBILE_QUERY).matches) {
+      setPanelOpen(true);
+    }
+  }, [popupAirportIata]);
   // Spotlight state accepts either subway or LIRR plans; downstream consumers
   // (planRouteIds memo, TransitMap) only read the shared subset of fields
   // (segments[].type, .routeId, .path), so a union is sufficient — no adapter
@@ -128,8 +140,10 @@ export default function App() {
         onPlanFound={setPlanRoute}
         aircraftCount={aircraft.length}
         metarReports={metarReports}
+        tafReports={tafReports}
         activeAirportIata={popupAirportIata}
         onSelectAirport={handleSelectAirport}
+        onClearAirport={handleClearAirport}
       />
     </AppShell>
   );
