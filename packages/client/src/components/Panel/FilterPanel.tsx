@@ -390,7 +390,13 @@ function AirspacePanelBody({
   return (
     <>
       {showInlineBriefing && (
+        // key={iata} forces a fresh mount on each airport switch so
+        // the internal `expanded` state resets to its default (true).
+        // Without this, React reuses the instance across selections
+        // and a previously-collapsed briefing stays collapsed for the
+        // next airport — defeating the "show selection expanded" intent.
         <AirportBriefing
+          key={activeAirport.iata}
           airport={activeAirport}
           metar={metarReports[activeAirport.icao] ?? null}
           taf={tafReports[activeAirport.icao] ?? null}
