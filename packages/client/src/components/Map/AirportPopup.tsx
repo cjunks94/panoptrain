@@ -284,10 +284,11 @@ function MetarSection({ metar }: { metar: MetarReport }) {
 }
 
 function TafSection({ taf }: { taf: TafReport }) {
-  // Pin the rendered "now" so toggling expand/collapse doesn't drift
-  // the active period across boundary crossings — at popup open time,
-  // pick the active period and stick with it for this open session.
-  const now = Date.now();
+  // Pin "now" via lazy useState init so toggling expand/collapse can't
+  // drift the active period across an FM boundary mid-session. The
+  // earlier inline `Date.now()` recomputed on every render — including
+  // the re-render triggered by setExpanded — defeating the intent.
+  const [now] = useState(() => Date.now());
   const current = findCurrentTafPeriod(taf.forecasts, now);
   const [expanded, setExpanded] = useState(false);
 

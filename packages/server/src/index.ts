@@ -32,7 +32,15 @@ const METAR_POLL_INTERVAL = parseInt(process.env.METAR_POLL_INTERVAL_MS ?? "9000
 // TAFs issue every 6h with mid-cycle amendments. 30 minutes catches
 // amendments inside one polling window without putting needless load
 // on the upstream — TAFs change far less frequently than METARs.
-const TAF_POLL_INTERVAL = parseInt(process.env.TAF_POLL_INTERVAL_MS ?? "1800000", 10);
+//
+// Validate aggressively here: a typo'd env var (parseInt → NaN, or a
+// stray "0") would degenerate setInterval into near-immediate polling
+// and hammer the upstream. Reject anything below a 1-minute floor.
+const TAF_POLL_INTERVAL_RAW = Number(process.env.TAF_POLL_INTERVAL_MS ?? "1800000");
+const TAF_POLL_INTERVAL =
+  Number.isFinite(TAF_POLL_INTERVAL_RAW) && TAF_POLL_INTERVAL_RAW >= 60_000
+    ? TAF_POLL_INTERVAL_RAW
+    : 1_800_000;
 
 const app = new Hono();
 

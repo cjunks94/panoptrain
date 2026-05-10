@@ -145,6 +145,22 @@ describe("parseTafResponse — forecast group parsing", () => {
     expect(out.reports.KJFK.forecasts[0].ceilingFt).toBe(3000);
   });
 
+  it("picks the lowest qualifying layer regardless of array order", () => {
+    // Defensive — the upstream typically sorts by altitude ascending,
+    // but the API doesn't document that contract. Out-of-order layers
+    // must still produce the correct (lowest) ceiling.
+    const out = parseTafResponse([makeRecord({
+      fcsts: [{
+        timeFrom: 1_778_400_000, timeTo: 1_778_410_000, fcstChange: "FM",
+        clouds: [
+          { cover: "OVC", base: 8000 },
+          { cover: "BKN", base: 2500 },
+        ],
+      }],
+    })], NOW);
+    expect(out.reports.KJFK.forecasts[0].ceilingFt).toBe(2500);
+  });
+
   it("returns null ceiling when only FEW/SCT layers are present", () => {
     const out = parseTafResponse([makeRecord({
       fcsts: [{

@@ -36,7 +36,14 @@ export function useTafs(enabled: boolean): UseTafsResult {
       return;
     }
     let cancelled = false;
+    // Guard against overlapping polls — the TAF payload is ~25KB so a
+    // slow response could overlap a fresh interval tick, and a stale
+    // older response landing after a newer one would clobber fresh
+    // data. Skip the tick if the previous poll is still in flight.
+    let inFlight = false;
     const poll = async () => {
+      if (inFlight) return;
+      inFlight = true;
       try {
         const res = await fetchTafs();
         if (cancelled) return;
@@ -56,6 +63,8 @@ export function useTafs(enabled: boolean): UseTafsResult {
           return;
         }
         setError(err instanceof Error ? err : new Error(msg));
+      } finally {
+        inFlight = false;
       }
     };
     poll();

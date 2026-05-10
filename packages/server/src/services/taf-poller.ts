@@ -84,14 +84,19 @@ function parseDirection(wdir: AwxTafForecast["wdir"]): number | null {
 
 function deriveCeiling(clouds: AwxTafForecast["clouds"]): number | null {
   if (!clouds || clouds.length === 0) return null;
-  // Same rule as METAR — lowest BKN/OVC/VV layer is the ceiling.
+  // Lowest BKN/OVC/VV layer is the ceiling. Scan all qualifying layers
+  // rather than returning the first match — the upstream typically
+  // sorts by altitude ascending, but the API doesn't document that
+  // contract, and an out-of-order layer would otherwise misreport the
+  // ceiling in the popup summary.
+  let lowest: number | null = null;
   for (const layer of clouds) {
     const cover = (layer.cover ?? "").toUpperCase();
-    if (cover === "BKN" || cover === "OVC" || cover === "VV") {
-      return typeof layer.base === "number" ? layer.base : null;
+    if ((cover === "BKN" || cover === "OVC" || cover === "VV") && typeof layer.base === "number") {
+      if (lowest === null || layer.base < lowest) lowest = layer.base;
     }
   }
-  return null;
+  return lowest;
 }
 
 const VALID_CHANGES = new Set(["FM", "TEMPO", "BECMG", "PROB"]);
