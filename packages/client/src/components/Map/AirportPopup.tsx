@@ -1,6 +1,7 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Popup } from "react-map-gl/maplibre";
-import type { Airport, FlightCategory, Frequencies, MetarReport, Runway } from "@panoptrain/shared";
+import type { Airport, FlightCategory, Frequencies, MetarReport, Runway, TafReport } from "@panoptrain/shared";
+import { findCurrentTafPeriod } from "../../lib/tafCurrentPeriod.js";
 
 /** Click-to-inspect airport briefing — frequencies + runways + elevation
  *  + current METAR weather. The same set a pilot looks up in the FAA
@@ -13,10 +14,13 @@ interface AirportPopupProps {
    *  ASOS outage, etc.). The popup omits the weather section entirely
    *  rather than rendering empty rows. */
   metar: MetarReport | null;
+  /** Current TAF forecast, null if no report available. Same omit-on-null
+   *  rule as the METAR section. */
+  taf: TafReport | null;
   onClose: () => void;
 }
 
-export function AirportPopup({ airport, metar, onClose }: AirportPopupProps) {
+export function AirportPopup({ airport, metar, taf, onClose }: AirportPopupProps) {
   return (
     <Popup
       className="airport-popup"
@@ -44,6 +48,7 @@ export function AirportPopup({ airport, metar, onClose }: AirportPopupProps) {
         <Header airport={airport} metar={metar} onClose={onClose} />
         <StatsLine airport={airport} />
         {metar && <MetarSection metar={metar} />}
+        {taf && <TafSection taf={taf} />}
         <FrequenciesSection frequencies={airport.frequencies} />
         <RunwaysSection runways={airport.runways} />
       </div>
@@ -276,4 +281,104 @@ function MetarSection({ metar }: { metar: MetarReport }) {
       </div>
     </div>
   );
+}
+
+function TafSection({ taf }: { taf: TafReport }) {
+  // Pin "now" via lazy useState init so toggling expand/collapse can't
+  // drift the active period across an FM boundary mid-session. The
+  // earlier inline `Date.now()` recomputed on every render — including
+  // the re-render triggered by setExpanded — defeating the intent.
+  const [now] = useState(() => Date.now());
+  const current = findCurrentTafPeriod(taf.forecasts, now);
+  const [expanded, setExpanded] = useState(false);
+
+  const issueLabel = formatTafTime(taf.issuedAt);
+  const validFromLabel = formatTafTime(taf.validFrom);
+  const validToLabel = formatTafTime(taf.validTo);
+
+  const summary = current ? formatPeriodSummary(current) : null;
+  // Show the period window so the pilot knows when the current
+  // forecast applies — useful when amendments or FM groups land soon.
+  const windowLabel = current
+    ? `${formatTafTime(current.timeFrom)} – ${formatTafTime(current.timeTo)}`
+    : null;
+
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <SectionLabel>Forecast · issued {issueLabel}</SectionLabel>
+      {summary && windowLabel && (
+        <div style={{ marginBottom: 4 }}>
+          <div style={{ color: "#cbd5e1", fontSize: 11 }}>{windowLabel}</div>
+          <div style={{ color: "#e2e8f0", fontVariantNumeric: "tabular-nums" }}>{summary}</div>
+        </div>
+      )}
+      <div style={{ color: "#94a3b8", fontSize: 11 }}>
+        Valid {validFromLabel} – {validToLabel}
+      </div>
+      <button
+        type="button"
+        onClick={() => setExpanded((e) => !e)}
+        style={{
+          background: "none",
+          border: "none",
+          color: "#7dd3fc",
+          cursor: "pointer",
+          fontSize: 11,
+          padding: "4px 0 0",
+          textDecoration: "underline",
+        }}
+      >
+        {expanded ? "Hide raw TAF" : "Show raw TAF"}
+      </button>
+      {expanded && (
+        // Raw TAF is space-significant; preserve whitespace + wrap so
+        // long single-line TAFs don't blow out the popup width.
+        <pre
+          style={{
+            margin: "4px 0 0",
+            color: "#e2e8f0",
+            fontSize: 11,
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+            background: "rgba(15, 23, 42, 0.5)",
+            padding: 6,
+            borderRadius: 3,
+          }}
+        >
+          {taf.raw}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+/** Format epoch ms as "DDHHmm Z" — matches how pilots read TAF/METAR
+ *  times (issuance "092247Z" = day 9, 22:47 UTC). Compact and
+ *  unambiguous. */
+function formatTafTime(epochMs: number): string {
+  const d = new Date(epochMs);
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mm = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${day}${hh}${mm}Z`;
+}
+
+function formatPeriodSummary(p: ReturnType<typeof findCurrentTafPeriod> & object): string {
+  const parts: string[] = [];
+  if (p.wind) {
+    if (p.wind.speedKt === 0) {
+      parts.push("Calm");
+    } else if (p.wind.speedKt !== null) {
+      const dir = p.wind.directionDeg === null
+        ? "VRB"
+        : `${String(p.wind.directionDeg).padStart(3, "0")}°`;
+      const gust = p.wind.gustKt !== null ? `G${p.wind.gustKt}` : "";
+      parts.push(`${dir} @ ${p.wind.speedKt}${gust} kt`);
+    }
+  }
+  if (p.visibilitySm !== null) parts.push(`${p.visibilitySm} sm`);
+  if (p.ceilingFt !== null) parts.push(`${p.ceilingFt.toLocaleString("en-US")} ft ceil`);
+  if (p.wxString) parts.push(p.wxString);
+  return parts.length > 0 ? parts.join(" · ") : "No change from observation";
 }

@@ -9,6 +9,7 @@ import { loadStaticGtfs } from "./services/gtfs-loader.js";
 import { startPolling } from "./services/mta-poller.js";
 import { startAirspacePolling } from "./services/airspace-poller.js";
 import { startMetarPolling } from "./services/metar-poller.js";
+import { startTafPolling } from "./services/taf-poller.js";
 import { prewarmInterpolator } from "./services/position-interpolator.js";
 import { createTrainsRouter } from "./routes/trains.js";
 import { createStaticRouter } from "./routes/static.js";
@@ -28,6 +29,18 @@ const AIRSPACE_POLL_INTERVAL = parseInt(process.env.AIRSPACE_POLL_INTERVAL_MS ??
 // METARs only update hourly so polling faster wastes upstream cycles.
 // 15 minutes catches special reports (SPECI) without thrashing.
 const METAR_POLL_INTERVAL = parseInt(process.env.METAR_POLL_INTERVAL_MS ?? "900000", 10);
+// TAFs issue every 6h with mid-cycle amendments. 30 minutes catches
+// amendments inside one polling window without putting needless load
+// on the upstream — TAFs change far less frequently than METARs.
+//
+// Validate aggressively here: a typo'd env var (parseInt → NaN, or a
+// stray "0") would degenerate setInterval into near-immediate polling
+// and hammer the upstream. Reject anything below a 1-minute floor.
+const TAF_POLL_INTERVAL_RAW = Number(process.env.TAF_POLL_INTERVAL_MS ?? "1800000");
+const TAF_POLL_INTERVAL =
+  Number.isFinite(TAF_POLL_INTERVAL_RAW) && TAF_POLL_INTERVAL_RAW >= 60_000
+    ? TAF_POLL_INTERVAL_RAW
+    : 1_800_000;
 
 const app = new Hono();
 
@@ -120,10 +133,11 @@ try {
 
 if (AIRSPACE_ENABLED) {
   startAirspacePolling(AIRSPACE_POLL_INTERVAL);
-  // METAR shares the airspace gate — same upstream-availability concerns
-  // apply (sealed CI, offline dev) and the popup row is only useful on
-  // the airspace tab anyway.
+  // METAR + TAF share the airspace gate — same upstream-availability
+  // concerns apply (sealed CI, offline dev) and the popup rows are only
+  // useful on the airspace tab anyway.
   startMetarPolling(METAR_POLL_INTERVAL);
+  startTafPolling(TAF_POLL_INTERVAL);
 } else {
   console.log("Airspace polling disabled via AIRSPACE_ENABLED=false");
 }

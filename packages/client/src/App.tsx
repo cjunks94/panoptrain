@@ -11,6 +11,7 @@ import { useLineFilter } from "./hooks/useLineFilter.js";
 import { useView, transitModeFor } from "./hooks/useView.js";
 import { useAircraftPositions } from "./hooks/useAircraftPositions.js";
 import { useMetars } from "./hooks/useMetars.js";
+import { useTafs } from "./hooks/useTafs.js";
 import { MOBILE_QUERY } from "./hooks/useIsMobile.js";
 
 export default function App() {
@@ -31,9 +32,10 @@ export default function App() {
   const { routeShapes, stopsGeoJson, loading: routeShapesLoading } = useRouteShapes(transitMode);
   const { visibleRoutes, toggleRoute, toggleGroup, allOn, allOff } = useLineFilter(lineFilterMode);
   const { aircraft } = useAircraftPositions(view === "airspace");
-  // METAR feed only matters when the user can open an airport popup,
-  // which only happens on the airspace tab. Same gate as aircraft.
+  // METAR + TAF feeds only matter when the user can open an airport
+  // popup, which only happens on the airspace tab. Same gate as aircraft.
   const { reports: metarReports } = useMetars(view === "airspace");
+  const { reports: tafReports } = useTafs(view === "airspace");
 
   // Airport popup state lives at App so the directory in FilterPanel can
   // open the same popup as a map-click would. Token-based fly-to so the
@@ -102,6 +104,7 @@ export default function App() {
         routeShapesLoading={routeShapesLoading}
         aircraft={aircraft}
         metarReports={metarReports}
+        tafReports={tafReports}
         popupAirportIata={popupAirportIata}
         onPopupAirportIataChange={setPopupAirportIata}
         flyToToken={flyToToken}

@@ -7,6 +7,7 @@ import type {
   LirrPlanResponse,
   AirspaceResponse,
   MetarsResponse,
+  TafsResponse,
 } from "@panoptrain/shared";
 
 async function fetchJson<T>(path: string): Promise<T> {
@@ -62,4 +63,10 @@ export function fetchAirspaceAircraft(): Promise<AirspaceResponse> {
  *  — small payload (~5KB for 11 airports) and the popup looks up by ICAO. */
 export function fetchMetars(): Promise<MetarsResponse> {
   return fetchJson<MetarsResponse>("/airspace/metar");
+}
+
+/** Current TAF forecasts for every NYC-metro airport. Bulk endpoint —
+ *  payload is ~25KB (forecast periods are richer than METAR observations). */
+export function fetchTafs(): Promise<TafsResponse> {
+  return fetchJson<TafsResponse>("/airspace/taf");
 }
