@@ -1,7 +1,8 @@
 import { Hono } from "hono";
-import type { AirspaceResponse, MetarsResponse } from "@panoptrain/shared";
+import type { AirspaceResponse, MetarsResponse, TafsResponse } from "@panoptrain/shared";
 import { getCurrentAirspaceSnapshot } from "../services/airspace-poller.js";
 import { getCurrentMetarSnapshot } from "../services/metar-poller.js";
+import { getCurrentTafSnapshot } from "../services/taf-poller.js";
 
 const airspace = new Hono();
 
@@ -41,6 +42,21 @@ airspace.get("/metar", (c) => {
   // cache means fresher reads when the poller refreshes.
   c.header("Cache-Control", "public, max-age=60");
   return c.json(snap satisfies MetarsResponse);
+});
+
+airspace.get("/taf", (c) => {
+  const snap = getCurrentTafSnapshot();
+  if (!snap) {
+    return c.json(
+      { error: "TAF data not available — poller has not produced a snapshot yet" },
+      503,
+    );
+  }
+  // TAFs amend mid-cycle so a 5-minute max-age keeps amendments
+  // visible without thrashing the poller. Longer would be safe given
+  // the 6h base cycle, but the popup is the only consumer.
+  c.header("Cache-Control", "public, max-age=300");
+  return c.json(snap satisfies TafsResponse);
 });
 
 export default airspace;

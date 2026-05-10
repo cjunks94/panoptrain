@@ -7,6 +7,7 @@ import type {
   Mode,
   RoutesGeoJSON,
   StopsGeoJSON,
+  TafReport,
   TripPlan,
   LirrTripPlan,
 } from "@panoptrain/shared";
@@ -212,6 +213,9 @@ interface TransitMapProps {
    *  tab or before the first poll lands; the popup renders its other rows
    *  unchanged in that case. */
   metarReports: Record<string, MetarReport>;
+  /** Current TAF forecasts keyed by ICAO. Same gating semantics as
+   *  metarReports — empty until the first poll lands. */
+  tafReports: Record<string, TafReport>;
   /** Lifted to App so the panel directory and the map both drive the
    *  same popup. Map clicks call onPopupAirportIataChange directly;
    *  panel clicks go through App's handleSelectAirport which also
@@ -236,7 +240,7 @@ const POPUP_OFFSET_PX = 120;
  *  position so map curvature doesn't matter. */
 const POPUP_AHEAD_DEG = 0.001;
 
-export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, stops, planRoute, planRouteIds, mode, panelOpen, routeShapesLoading, aircraft, metarReports, popupAirportIata, onPopupAirportIataChange, flyToToken }: TransitMapProps) {
+export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, stops, planRoute, planRouteIds, mode, panelOpen, routeShapesLoading, aircraft, metarReports, tafReports, popupAirportIata, onPopupAirportIataChange, flyToToken }: TransitMapProps) {
   const [popupTripId, setPopupTripId] = useState<string | null>(null);
   const [iconsReady, setIconsReady] = useState(false);
   const [followTripId, setFollowTripId] = useState<string | null>(null);
@@ -1375,6 +1379,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
         <AirportPopup
           airport={popupAirport}
           metar={metarReports[popupAirport.icao] ?? null}
+          taf={tafReports[popupAirport.icao] ?? null}
           onClose={() => setPopupAirportIata(null)}
         />
       )}

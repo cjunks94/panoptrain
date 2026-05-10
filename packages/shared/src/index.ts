@@ -47,6 +47,7 @@ export type { Mode } from "./constants/feeds.js";
 
 export type { Aircraft, AirspaceResponse } from "./types/airspace.js";
 export type { MetarReport, MetarsResponse, FlightCategory } from "./types/metar.js";
+export type { TafReport, TafsResponse, TafPeriod } from "./types/taf.js";
 export { AIRPORTS } from "./constants/airports.js";
 export type { Airport, Runway, RunwaySurface, Frequencies } from "./constants/airports.js";
 

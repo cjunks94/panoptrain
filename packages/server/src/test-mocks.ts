@@ -60,6 +60,10 @@ const handlers = [
   http.get("https://aviationweather.gov/api/data/metar", () =>
     HttpResponse.json(jsonFixture("aviationweather-metar.json")),
   ),
+  // TAF endpoint — same shape as METAR, fixture covers all airports.
+  http.get("https://aviationweather.gov/api/data/taf", () =>
+    HttpResponse.json(jsonFixture("aviationweather-taf.json")),
+  ),
 ];
 
 export const e2eServer = setupServer(...handlers);
