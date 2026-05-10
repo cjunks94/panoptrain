@@ -3,6 +3,7 @@ import type { Mode, TrainsResponse, TrainPosition, RoutesGeoJSON } from "@panopt
 import { getRouteInfo } from "../lib/colors.js";
 import { buildShapeIndex, findTrackPath, interpolateAlongPath } from "../lib/trackInterpolation.js";
 import type { TrackPath } from "../lib/trackInterpolation.js";
+import { cancelIdle, scheduleIdle } from "../lib/scheduleIdle.js";
 
 const POLL_INTERVAL = parseInt(import.meta.env.VITE_POLL_INTERVAL_MS ?? "30000", 10);
 
@@ -71,10 +72,25 @@ export function useTrainFeatures(
   const lastRenderedFraction = useRef(-1);
   const [trains, setTrains] = useState<TrainInfo[]>([]);
 
-  // Build shape index once when route shapes load
+  // Build shape index once when route shapes load. Deferred via
+  // requestIdleCallback so the synchronous iteration over every feature
+  // (turfLength on each — expensive on the multi-MB LIRR payload) doesn't
+  // block the first render of the route lines on the map. Trains animate
+  // via the linear-distance fallback in processSlice for the brief
+  // window before the index lands; the WeakMap memo in buildShapeIndex
+  // means re-mounts (cache-hit tab switches) hit instantly because the
+  // routes ref is identical and we return the cached index.
   useEffect(() => {
     if (!routeShapes) return;
-    shapeIndexRef.current = buildShapeIndex(routeShapes);
+    let cancelled = false;
+    const handle = scheduleIdle(() => {
+      if (cancelled) return;
+      shapeIndexRef.current = buildShapeIndex(routeShapes);
+    });
+    return () => {
+      cancelled = true;
+      cancelIdle(handle);
+    };
   }, [routeShapes]);
 
   // Clear interpolation tracking on mode change. Prior to mode-cache
