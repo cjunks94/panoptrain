@@ -3,6 +3,7 @@ import type { Mode, TrainsResponse, TrainPosition, RoutesGeoJSON } from "@panopt
 import { getRouteInfo } from "../lib/colors.js";
 import { buildShapeIndex, findTrackPath, interpolateAlongPath } from "../lib/trackInterpolation.js";
 import type { TrackPath } from "../lib/trackInterpolation.js";
+import { cancelIdle, scheduleIdle } from "../lib/scheduleIdle.js";
 
 const POLL_INTERVAL = parseInt(import.meta.env.VITE_POLL_INTERVAL_MS ?? "30000", 10);
 
@@ -70,11 +71,44 @@ export function useTrainFeatures(
   // the feature set changes so filter toggles still trigger a redraw.
   const lastRenderedFraction = useRef(-1);
   const [trains, setTrains] = useState<TrainInfo[]>([]);
+  // Bumps whenever the deferred buildShapeIndex completes. Lives in
+  // React state (not a ref) so we can include it in the slice-scheduling
+  // effect's deps below. Without this, a data poll arriving BEFORE the
+  // idle build fires would capture an empty shapeIndexRef, exit the
+  // empty-index guard in processSlice, and leave trains on linear
+  // fallback until the NEXT live poll (~30s). Bumping triggers the
+  // slice scheduler to re-run with the now-populated index.
+  const [shapeIndexVersion, setShapeIndexVersion] = useState(0);
 
-  // Build shape index once when route shapes load
+  // Build shape index when route shapes load. Deferred via
+  // requestIdleCallback so the synchronous iteration over every feature
+  // (turfLength on each — expensive on the multi-MB LIRR payload) doesn't
+  // block the first render of the route lines on the map. Trains animate
+  // via the linear-distance fallback in processSlice for the brief
+  // window before the index lands; the WeakMap memo in buildShapeIndex
+  // means re-mounts (cache-hit tab switches) hit instantly because the
+  // routes ref is identical and we return the cached index.
   useEffect(() => {
-    if (!routeShapes) return;
-    shapeIndexRef.current = buildShapeIndex(routeShapes);
+    if (!routeShapes) {
+      shapeIndexRef.current = {};
+      return;
+    }
+    // Clear synchronously so a data poll arriving before the idle
+    // build fires can't read the previous mode's stale shapes (subway
+    // and LIRR routeIds can collide; a stale subway index serving a
+    // LIRR train lookup would route the LIRR train onto subway
+    // geometry where keys overlap).
+    shapeIndexRef.current = {};
+    let cancelled = false;
+    const handle = scheduleIdle(() => {
+      if (cancelled) return;
+      shapeIndexRef.current = buildShapeIndex(routeShapes);
+      setShapeIndexVersion((v) => v + 1);
+    });
+    return () => {
+      cancelled = true;
+      cancelIdle(handle);
+    };
   }, [routeShapes]);
 
   // Clear interpolation tracking on mode change. Prior to mode-cache
@@ -100,7 +134,10 @@ export function useTrainFeatures(
     lastRenderedFraction.current = -1;
   }, [mode]);
 
-  // Shift position snapshots when new data arrives (fast — no heavy computation)
+  // Shift position snapshots when new data arrives (fast — no heavy
+  // computation). Split from the slice-scheduling effect below so we
+  // don't re-do the snapshot shift when only `shapeIndexVersion`
+  // changes (the cache-hit / deferred-build-completes path).
   useEffect(() => {
     if (!data || data === lastDataRef.current) return;
     const isFirstPoll = lastDataRef.current === null;
@@ -125,20 +162,29 @@ export function useTrainFeatures(
     }
     currPositions.current = positions;
     snapshotTime.current = Date.now();
+  }, [data]);
 
-    // Defer track path computation in time-budgeted slices so a large poll
-    // (LIRR + subway combined, ~700 trains) doesn't block the main thread.
-    // Each slice runs until ~8ms elapsed, then yields — adapts to actual
-    // turf cost (warm cache processes hundreds per slice, cold cache fewer)
-    // without ever producing a 50ms+ handler. Trains without a computed
-    // path yet animate via linear fallback — the RAF loop already handles
-    // missing entries — so animation degrades gracefully from straight-line
-    // to on-rail as slices land.
+  // Schedule track-path computation in time-budgeted slices. Keyed on
+  // both `data` and `shapeIndexVersion` so it re-runs when the deferred
+  // shape-index build completes (otherwise a data poll arriving before
+  // idle would capture an empty ref, exit on the empty-index guard, and
+  // leave trains on linear fallback until the next live poll).
+  //
+  // Each slice runs until ~8ms elapsed, then yields — adapts to actual
+  // turf cost (warm cache processes hundreds per slice, cold cache fewer)
+  // without ever producing a 50ms+ handler. Trains without a computed
+  // path yet animate via linear fallback — the RAF loop already handles
+  // missing entries — so animation degrades gracefully from straight-line
+  // to on-rail as slices land.
+  useEffect(() => {
+    if (!data) return;
+    const index = shapeIndexRef.current;
+    if (Object.keys(index).length === 0) return;
+
     const MIN_DIST_SQ = 0.002 * 0.002; // ~200m in degrees
     const SLICE_BUDGET_MS = 8;
     const trainsToProcess = data.trains;
     const prev = prevPositions.current;
-    const index = shapeIndexRef.current;
 
     const paths = new Map<string, TrackPath>();
     trackPaths.current = paths;
@@ -156,7 +202,7 @@ export function useTrainFeatures(
     };
 
     const processSlice = (start: number, deadline?: IdleDeadline) => {
-      if (cancelled || Object.keys(index).length === 0) return;
+      if (cancelled) return;
       const sliceStart = performance.now();
       let i = start;
       while (i < trainsToProcess.length) {
@@ -195,7 +241,7 @@ export function useTrainFeatures(
       }
       if (timeoutHandle !== null) clearTimeout(timeoutHandle);
     };
-  }, [data]);
+  }, [data, shapeIndexVersion]);
 
   // Rebuild features when data or visibleRoutes change. When `data` is
   // cleared on a mode flip (Subway↔LIRR↔Airspace), reset every cached

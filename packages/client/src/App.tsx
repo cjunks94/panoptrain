@@ -13,6 +13,14 @@ import { useAircraftPositions } from "./hooks/useAircraftPositions.js";
 import { useMetars } from "./hooks/useMetars.js";
 import { useTafs } from "./hooks/useTafs.js";
 import { MOBILE_QUERY } from "./hooks/useIsMobile.js";
+import { fetchRoutes, fetchStops } from "./lib/api.js";
+import {
+  getRoutes as getCachedRoutes,
+  getStops as getCachedStops,
+  setRoutes as setCachedRoutes,
+  setStops as setCachedStops,
+} from "./lib/modeCache.js";
+import { cancelIdle, scheduleIdle } from "./lib/scheduleIdle.js";
 
 export default function App() {
   const [view, setView] = useView();
@@ -82,6 +90,49 @@ export default function App() {
   // meaningful on airspace.
   useEffect(() => {
     setPlanRoute(null);
+  }, [transitMode]);
+
+  // Background-preload the inactive mode's routes/stops on idle so the
+  // first cross-mode tab switch hits the modeCache instead of paying the
+  // multi-MB GeoJSON download + parse on the click. Runs whenever the
+  // active mode changes (or on first mount), schedules the fetches
+  // through requestIdleCallback so it doesn't fight the current mode's
+  // first paint. From airspace we preload subway only — most users
+  // landing on airspace are coming from or going to the transit view,
+  // and subway is the more common destination of the two.
+  useEffect(() => {
+    const inactive: Mode[] = transitMode === null
+      ? ["subway"]
+      : transitMode === "subway" ? ["lirr"] : ["subway"];
+
+    let cancelled = false;
+    const handle = scheduleIdle(() => {
+      if (cancelled) return;
+      for (const mode of inactive) {
+        if (!getCachedRoutes(mode)) {
+          fetchRoutes(mode)
+            .then((r) => {
+              // Re-check on resolve: if a foreground useRouteShapes
+              // fetch beat us to it, don't overwrite (would change the
+              // object identity and bust the WeakMap-cached shape index).
+              if (!cancelled && !getCachedRoutes(mode)) setCachedRoutes(mode, r);
+            })
+            .catch(() => { /* preload is best-effort */ });
+        }
+        if (!getCachedStops(mode)) {
+          fetchStops(mode)
+            .then((s) => {
+              if (!cancelled && !getCachedStops(mode)) setCachedStops(mode, s);
+            })
+            .catch(() => { /* preload is best-effort */ });
+        }
+      }
+    }, 1500);
+
+    return () => {
+      cancelled = true;
+      cancelIdle(handle);
+    };
   }, [transitMode]);
 
   // When a plan is active, surface only the routes that plan rides — these
