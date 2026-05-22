@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import type { Mode, TrainsResponse } from "@panoptrain/shared";
 import { fetchTrains } from "../lib/api.js";
 import { getLastTrains, setLastTrains } from "../lib/modeCache.js";
+import { recordPoll } from "../lib/debug.js";
 
 // Injected by vite.config.ts from the repo-root POLL_INTERVAL_MS env var so
 // this stays in lockstep with the server's polling cadence.
@@ -58,6 +59,7 @@ export function useTrainPositions(mode: Mode | null): UseTrainPositionsResult {
       const result = await fetchTrains(requested);
       if (modeRef.current !== requested) return; // mode flipped mid-flight
       setLastTrains(requested, result);
+      recordPoll(requested, result);
       setData(result);
       setLastUpdated(Date.now());
       setIsStale(false);

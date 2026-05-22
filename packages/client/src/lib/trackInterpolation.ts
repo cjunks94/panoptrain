@@ -4,6 +4,7 @@ import turfLength from "@turf/length";
 import { lineString } from "@turf/helpers";
 import type { RoutesGeoJSON } from "@panoptrain/shared";
 import { scheduleIdle } from "./scheduleIdle.js";
+import { recordPathFailure } from "./debug.js";
 
 interface ShapeData {
   line: ReturnType<typeof lineString>;
@@ -65,13 +66,27 @@ function cachedBestShape(
     }
   }
 
-  const result = bestDist <= 0.5 ? best : null; // > 500m → no match
+  // Threshold tuning: was 0.5km. LIRR trains at terminal platforms (Penn,
+  // Atlantic, LIC, Grand Central) sit beyond 500m of the modeled center-
+  // line of route 10's shape; raised to 2km to catch them. Failed lookups
+  // are still recorded so we can see the distribution and tune further.
+  const THRESHOLD_KM = 2.0;
+  const result = bestDist <= THRESHOLD_KM ? best : null;
+  if (!result) {
+    recordPathFailure({
+      routeId,
+      reason: "too_far",
+      bestDistKm: bestDist,
+      pos,
+      at: Date.now(),
+    });
+  }
   if (bestShapeCache.size >= MAX_CACHE_SIZE) {
     const first = bestShapeCache.keys().next().value!;
     bestShapeCache.delete(first);
   }
   bestShapeCache.set(key, result);
-  return { shape: result, tooFar: bestDist > 0.5 };
+  return { shape: result, tooFar: bestDist > THRESHOLD_KM };
 }
 
 // Memoize indexes per routes payload. WeakMap-keyed by the cached routes
@@ -180,7 +195,16 @@ export function findTrackPath(
   currPos: [number, number],
 ): TrackPath | null {
   const shapes = shapeIndex[routeId];
-  if (!shapes || shapes.length === 0) return null;
+  if (!shapes || shapes.length === 0) {
+    recordPathFailure({
+      routeId,
+      reason: "no_shapes",
+      bestDistKm: null,
+      pos: currPos,
+      at: Date.now(),
+    });
+    return null;
+  }
 
   const { shape, tooFar } = cachedBestShape(shapes, routeId, currPos);
   if (!shape || tooFar) return null;
