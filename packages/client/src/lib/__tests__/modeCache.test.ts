@@ -66,6 +66,7 @@ function makeTrains(routeId: string): TrainsResponse {
         destination: "Dest",
         delay: null,
         updatedAt: 1_700_000_000,
+        lastObservedAt: 1_700_000_000,
       },
     ],
   };

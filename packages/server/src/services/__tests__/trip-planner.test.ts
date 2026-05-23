@@ -169,6 +169,7 @@ describe("enrichWithDelays", () => {
       destination: "x",
       delay,
       updatedAt: Math.floor(Date.now() / 1000),
+      lastObservedAt: Math.floor(Date.now() / 1000),
     };
   }
 

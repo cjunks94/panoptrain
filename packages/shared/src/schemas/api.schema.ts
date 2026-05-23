@@ -15,6 +15,7 @@ export const TrainPositionSchema = z.object({
   destination: z.string(),
   delay: z.number().nullable(),
   updatedAt: z.number(),
+  lastObservedAt: z.number().nullable(),
 });
 
 export const TrainsResponseSchema = z.object({

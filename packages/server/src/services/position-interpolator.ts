@@ -296,6 +296,7 @@ function estimateVehicle(
     destination: rs.tripHeadsign,
     delay,
     updatedAt: vehicle.timestamp,
+    lastObservedAt: vehicle.timestamp,
   };
 }
 
@@ -414,6 +415,8 @@ function estimateFromTripUpdate(
     destination: rs.tripHeadsign,
     delay,
     updatedAt: nextStu.arrival?.time ?? now,
+    // No vehicle backed this position — pure schedule derivation.
+    lastObservedAt: null,
   };
 }
 
