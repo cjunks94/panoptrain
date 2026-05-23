@@ -4,6 +4,14 @@ import { getRouteInfo } from "../lib/colors.js";
 import { buildShapeIndex, findTrackPath, interpolateAlongPath } from "../lib/trackInterpolation.js";
 import type { TrackPath } from "../lib/trackInterpolation.js";
 import { cancelIdle, scheduleIdle } from "../lib/scheduleIdle.js";
+import {
+  recordShapeIndexStart,
+  recordShapeIndexFinish,
+  recordPositions,
+  recordSlice,
+  recordSkipBreakdown,
+  getCurrentPollSeq,
+} from "../lib/debug.js";
 
 const POLL_INTERVAL = parseInt(import.meta.env.VITE_POLL_INTERVAL_MS ?? "30000", 10);
 
@@ -100,9 +108,16 @@ export function useTrainFeatures(
     // geometry where keys overlap).
     shapeIndexRef.current = {};
     let cancelled = false;
+    if (mode !== null) recordShapeIndexStart(mode);
     const handle = scheduleIdle(() => {
       if (cancelled) return;
-      shapeIndexRef.current = buildShapeIndex(routeShapes);
+      const built = buildShapeIndex(routeShapes);
+      shapeIndexRef.current = built;
+      const routeCounts: Record<string, number> = {};
+      for (const [routeId, shapes] of Object.entries(built)) {
+        routeCounts[routeId] = shapes.length;
+      }
+      recordShapeIndexFinish(Object.keys(built).length, routeCounts);
       setShapeIndexVersion((v) => v + 1);
     });
     return () => {
@@ -157,12 +172,27 @@ export function useTrainFeatures(
     }
 
     const positions = new Map<string, [number, number]>();
+    const byTripId = new Map<string, TrainPosition>();
     for (const t of data.trains) {
       positions.set(t.tripId, [t.longitude, t.latitude]);
+      byTripId.set(t.tripId, t);
     }
     currPositions.current = positions;
     snapshotTime.current = Date.now();
-  }, [data]);
+    // Expose live refs to window.__panoptrain so devtools queries see the
+    // current state — trackPaths grows over slices, so passing the ref lets
+    // pathsCoverage() reflect the build progress without re-recording.
+    if (mode !== null) {
+      recordPositions({
+        prev: prevPositions.current,
+        curr: currPositions.current,
+        trackPathsRef: trackPaths,
+        byTripId,
+        mode,
+        at: snapshotTime.current,
+      });
+    }
+  }, [data, mode]);
 
   // Schedule track-path computation in time-budgeted slices. Keyed on
   // both `data` and `shapeIndexVersion` so it re-runs when the deferred
@@ -182,7 +212,12 @@ export function useTrainFeatures(
     if (Object.keys(index).length === 0) return;
 
     const MIN_DIST_SQ = 0.002 * 0.002; // ~200m in degrees
-    const SLICE_BUDGET_MS = 8;
+    // Each slice processes trains until ~32ms elapsed, then yields. Raised
+    // from 8ms after telemetry showed ~15-20% trackPath coverage on LIRR
+    // (108 trains, expensive turfNearestPointOnLine over multi-MB shapes).
+    // 32ms is still under the 60fps frame budget if other work is idle,
+    // and `requestIdleCallback` already gates against frame-time pressure.
+    const SLICE_BUDGET_MS = 32;
     const trainsToProcess = data.trains;
     const prev = prevPositions.current;
 
@@ -192,6 +227,11 @@ export function useTrainFeatures(
     let cancelled = false;
     let idleHandle: number | null = null;
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    let sliceN = 0;
+    let skipNoPrev = 0;
+    let skipStationary = 0;
+    let computed = 0;
+    const pollN = getCurrentPollSeq();
 
     const schedule = (cb: (deadline?: IdleDeadline) => void) => {
       if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function") {
@@ -204,6 +244,7 @@ export function useTrainFeatures(
     const processSlice = (start: number, deadline?: IdleDeadline) => {
       if (cancelled) return;
       const sliceStart = performance.now();
+      const pathsBefore = paths.size;
       let i = start;
       while (i < trainsToProcess.length) {
         // Yield if the time budget is exhausted. Always process at least
@@ -217,18 +258,39 @@ export function useTrainFeatures(
         }
         const t = trainsToProcess[i];
         const p = prev.get(t.tripId);
-        if (p) {
+        if (!p) {
+          skipNoPrev += 1;
+        } else {
           const dx = t.longitude - p[0];
           const dy = t.latitude - p[1];
-          if (dx * dx + dy * dy >= MIN_DIST_SQ) {
+          if (dx * dx + dy * dy < MIN_DIST_SQ) {
+            skipStationary += 1;
+          } else {
+            computed += 1;
             const path = findTrackPath(index, t.routeId, p, [t.longitude, t.latitude]);
             if (path) paths.set(t.tripId, path);
           }
         }
         i++;
       }
+      sliceN += 1;
+      recordSlice({
+        pollN,
+        sliceN,
+        trains: i - start,
+        ms: Math.round((performance.now() - sliceStart) * 100) / 100,
+        pathsAdded: paths.size - pathsBefore,
+      });
       if (i < trainsToProcess.length) {
         schedule((d) => processSlice(i, d));
+      } else {
+        recordSkipBreakdown({
+          pollN,
+          total: trainsToProcess.length,
+          noPrev: skipNoPrev,
+          stationary: skipStationary,
+          computed,
+        });
       }
     };
 
