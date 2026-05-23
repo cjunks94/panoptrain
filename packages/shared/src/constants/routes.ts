@@ -70,7 +70,7 @@ export const LIRR_ROUTE_GROUPS = [
   { label: "Far Rockaway", routes: ["7"], color: "#6E3219" },
   { label: "West Hempstead", routes: ["8"], color: "#00A1DE" },
   { label: "Port Washington", routes: ["9"], color: "#C60C30" },
-  { label: "Port Jefferson", routes: ["10"], color: "#006EC7" },
+  { label: "Port Jefferson / Huntington", routes: ["10"], color: "#006EC7" },
   { label: "Belmont", routes: ["11"], color: "#60269E" },
   { label: "City Terminal", routes: ["12"], color: "#4D5357" },
 ] as const;
