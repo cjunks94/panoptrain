@@ -114,7 +114,13 @@ jobs:
       # shard runs in its own GH runner job in parallel — wall-clock
       # roughly = single-runner-time / shard-count, at the cost of N×
       # runner minutes consumed.
-      - run: pnpm test:e2e -- --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+      #
+      # Calling playwright directly via `pnpm exec` (rather than
+      # `pnpm test:e2e -- --shard=...`) avoids a pnpm double-script-layer
+      # quirk where the `--` was forwarded as a literal arg, making
+      # playwright treat `--shard=N/M` as a positional test-file path
+      # and bail with "No tests found".
+      - run: pnpm --filter @panoptrain/e2e exec playwright test --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
       - name: Upload e2e results JSON
         if: always()
