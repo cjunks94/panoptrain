@@ -27,6 +27,12 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
+      // mobile.spec.ts covers touch-target sizing, bottom-sheet behavior,
+      // and mobile-only plan flows — running it on a desktop viewport is
+      // wasted work (15 tests × 25-48s each per CI run, profile-flakes
+      // measured chromium's mobile.spec.ts at ~3.5 min). Tests stay
+      // covered by the two mobile projects.
+      testIgnore: /mobile\.spec\.ts/,
     },
     {
       name: "mobile-chrome",
