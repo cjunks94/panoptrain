@@ -219,17 +219,60 @@ function estimateVehicle(
   const lineData = getLine(rs.shapeId, gtfs);
   if (!lineData) return null;
 
-  const stop = gtfs.stops[vehicle.currentStopId];
-  if (!stop) return null;
-
   const distances = gtfs.stopDistances[rs.shapeId] ?? {};
-  const currentDist = distances[vehicle.currentStopId];
 
-  // Resolve delay from trip update
+  // Resolve the *effective* current leg. The vehicle's currentStopId is the
+  // stop MTA last reported, but for sparse feeds (LIRR) that report is often
+  // minutes stale. When we have a trip update, walk forward through its
+  // stop_time_updates from the vehicle's reported stop to find the leg that
+  // actually contains `now`. The vehicle's stop acts as a lower bound — we
+  // never walk backwards. See ADR 002.
+  let effectiveStopId = vehicle.currentStopId;
+  let effectivePrevStopId: string | null = null;
+  let effectiveStatus: ParsedVehicle["currentStatus"] = vehicle.currentStatus;
+  let nextStopId: string | null = null;
+
+  if (tripUpdate) {
+    const startIdx = tripUpdate.stopTimeUpdates.findIndex(
+      (stu) => stu.stopId === vehicle.currentStopId,
+    );
+    if (startIdx >= 0) {
+      const leg = findCurrentLeg(tripUpdate, now, startIdx);
+      effectiveStopId = tripUpdate.stopTimeUpdates[leg.nextIdx].stopId;
+      effectivePrevStopId =
+        leg.prevIdx !== leg.nextIdx ? tripUpdate.stopTimeUpdates[leg.prevIdx].stopId : null;
+      effectiveStatus = leg.status;
+      nextStopId =
+        leg.nextIdx < tripUpdate.stopTimeUpdates.length - 1
+          ? tripUpdate.stopTimeUpdates[leg.nextIdx + 1].stopId
+          : null;
+    } else {
+      // vehicle.currentStopId isn't in this trip update's stop_time_updates
+      // (rare — possibly stale vehicle entity, schedule reroute, or feed
+      // mismatch). Keep the old fallback: derive prev from stopSequence.
+      const adjacent = findAdjacentStops(vehicle, tripUpdate, rs, gtfs);
+      effectivePrevStopId = adjacent.prevStopId;
+      nextStopId = findNextStop(vehicle, rs, gtfs).nextStopId;
+    }
+  } else {
+    // No trip update — no schedule data to walk against. Keep existing
+    // midpoint behavior via findAdjacentStops + the 0.5-fraction fallback.
+    const adjacent = findAdjacentStops(vehicle, undefined, rs, gtfs);
+    effectivePrevStopId = adjacent.prevStopId;
+    nextStopId = findNextStop(vehicle, rs, gtfs).nextStopId;
+  }
+
+  const stop = gtfs.stops[effectiveStopId];
+  if (!stop) return null;
+  const currentDist = distances[effectiveStopId];
+
+  // Resolve delay from the *effective* current stop, not the vehicle's
+  // claimed stop — when walking forward the relevant delay is for the
+  // stop we're actually heading to.
   let delay: number | null = null;
   if (tripUpdate) {
     for (const stu of tripUpdate.stopTimeUpdates) {
-      if (stu.stopId === vehicle.currentStopId) {
+      if (stu.stopId === effectiveStopId) {
         delay = stu.arrival?.delay ?? stu.departure?.delay ?? null;
         break;
       }
@@ -240,10 +283,9 @@ function estimateVehicle(
   let lon: number;
   let trainBearing: number | null = null;
 
-  if (vehicle.currentStatus === "STOPPED_AT") {
+  if (effectiveStatus === "STOPPED_AT") {
     lat = stop.lat;
     lon = stop.lon;
-    // Even for stopped trains, compute bearing from the shape direction at this stop
     if (currentDist !== undefined) {
       trainBearing = bearingAtDist(lineData, currentDist);
     }
@@ -251,16 +293,13 @@ function estimateVehicle(
     lat = stop.lat;
     lon = stop.lon;
   } else {
-    // Moving — find adjacent stops and interpolate
-    const adjacent = findAdjacentStops(vehicle, tripUpdate, rs, gtfs);
-
-    const prevDist = adjacent.prevStopId ? distances[adjacent.prevStopId] : undefined;
-    const nextDist = distances[vehicle.currentStopId]; // currentStopId is the one we're heading to
+    const prevDist = effectivePrevStopId ? distances[effectivePrevStopId] : undefined;
+    const nextDist = currentDist; // we're heading to effectiveStopId
 
     if (prevDist !== undefined && nextDist !== undefined && prevDist !== nextDist) {
       let fraction = 0.5;
-      if (tripUpdate) {
-        fraction = computeTimeFraction(tripUpdate, adjacent.prevStopId!, vehicle.currentStopId, now);
+      if (tripUpdate && effectivePrevStopId) {
+        fraction = computeTimeFraction(tripUpdate, effectivePrevStopId, effectiveStopId, now);
       }
 
       const interpDist = prevDist + fraction * (nextDist - prevDist);
@@ -270,15 +309,12 @@ function estimateVehicle(
       lat = pt.geometry.coordinates[1];
       trainBearing = bearingAtDist(lineData, clamped);
     } else {
-      // First stop on route or can't find prev — place at the stop but with shape bearing
       lat = stop.lat;
       lon = stop.lon;
       trainBearing = bearingAtDist(lineData, currentDist);
     }
   }
 
-  // Find next stop name
-  const { nextStopId } = findNextStop(vehicle, rs, gtfs);
   const nextStop = nextStopId ? gtfs.stops[nextStopId] : null;
 
   return {
@@ -288,14 +324,15 @@ function estimateVehicle(
     latitude: lat,
     longitude: lon,
     bearing: trainBearing,
-    status: vehicle.currentStatus,
-    currentStopId: vehicle.currentStopId,
+    status: effectiveStatus,
+    currentStopId: effectiveStopId,
     currentStopName: stop.stopName,
-    nextStopId: nextStopId,
+    nextStopId,
     nextStopName: nextStop?.stopName ?? null,
     destination: rs.tripHeadsign,
     delay,
     updatedAt: vehicle.timestamp,
+    lastObservedAt: vehicle.timestamp,
   };
 }
 
@@ -316,42 +353,11 @@ function estimateFromTripUpdate(
 
   const distances = gtfs.stopDistances[rs.shapeId] ?? {};
 
-  // Find which two stops the train is between based on time. Track indices
-  // so we can grab the stop *after* nextStu for the API's `nextStopId` field
-  // (the immediate-next-after-current stop).
-  //
-  // Three states per stop, in order: not-yet-arrived → dwelling → departed.
-  // Falling back arrival↔departure when one is missing handles origin stops
-  // (departure-only) and terminal stops (arrival-only) without misclassifying
-  // a dwelling train as in-transit to the following stop.
-  let prevIdx = 0;
-  let nextIdx = 0;
-
-  for (let i = 0; i < tu.stopTimeUpdates.length; i++) {
-    const stu = tu.stopTimeUpdates[i];
-    const arriveTime = stu.arrival?.time ?? stu.departure?.time ?? 0;
-    const departTime = stu.departure?.time ?? stu.arrival?.time ?? 0;
-
-    if (arriveTime > now) {
-      // Train is still en route to this stop — interpolate between i-1 and i.
-      nextIdx = i;
-      prevIdx = i > 0 ? i - 1 : i;
-      break;
-    }
-    if (departTime > now) {
-      // Arrived but not yet departed — train is sitting at this stop.
-      prevIdx = i;
-      nextIdx = i;
-      break;
-    }
-    prevIdx = i;
-    nextIdx = i;
-  }
-
-  const prevStu = tu.stopTimeUpdates[prevIdx];
-  const nextStu = tu.stopTimeUpdates[nextIdx];
+  const leg = findCurrentLeg(tu, now, 0);
+  const prevStu = tu.stopTimeUpdates[leg.prevIdx];
+  const nextStu = tu.stopTimeUpdates[leg.nextIdx];
   const afterNextStu =
-    nextIdx < tu.stopTimeUpdates.length - 1 ? tu.stopTimeUpdates[nextIdx + 1] : null;
+    leg.nextIdx < tu.stopTimeUpdates.length - 1 ? tu.stopTimeUpdates[leg.nextIdx + 1] : null;
 
   const prevDist = distances[prevStu.stopId];
   const nextDist = distances[nextStu.stopId];
@@ -414,6 +420,8 @@ function estimateFromTripUpdate(
     destination: rs.tripHeadsign,
     delay,
     updatedAt: nextStu.arrival?.time ?? now,
+    // No vehicle backed this position — pure schedule derivation.
+    lastObservedAt: null,
   };
 }
 
@@ -481,4 +489,44 @@ function computeTimeFraction(
   }
 
   return 0.5;
+}
+
+/**
+ * Walk forward through a trip update's stop_time_updates to find the leg
+ * that contains `now`. Returns indices into `tu.stopTimeUpdates`:
+ *
+ * - `prevIdx === nextIdx`: train is dwelling at that stop (status STOPPED_AT)
+ * - `prevIdx + 1 === nextIdx`: train is on the leg between two stops (IN_TRANSIT_TO)
+ * - past end of trip: both indices at the last stop, status STOPPED_AT
+ *
+ * `startFromIdx` lets callers skip past stops the train is already known to
+ * be past — used by estimateVehicle to anchor at the vehicle's reported
+ * currentStopId so we never walk backwards even if the schedule says we
+ * should be behind it.
+ *
+ * Three states per stop, in order: not-yet-arrived → dwelling → departed.
+ * Falling back arrival↔departure when one is missing handles origin stops
+ * (departure-only) and terminal stops (arrival-only) without misclassifying
+ * a dwelling train as in-transit to the following stop. See ADR 002.
+ */
+function findCurrentLeg(
+  tu: ParsedTripUpdate,
+  now: number,
+  startFromIdx: number,
+): { prevIdx: number; nextIdx: number; status: ParsedVehicle["currentStatus"] } {
+  for (let i = startFromIdx; i < tu.stopTimeUpdates.length; i++) {
+    const stu = tu.stopTimeUpdates[i];
+    const arriveTime = stu.arrival?.time ?? stu.departure?.time ?? 0;
+    const departTime = stu.departure?.time ?? stu.arrival?.time ?? 0;
+
+    if (arriveTime > now) {
+      const prev = i > 0 ? i - 1 : i;
+      return { prevIdx: prev, nextIdx: i, status: "IN_TRANSIT_TO" };
+    }
+    if (departTime > now) {
+      return { prevIdx: i, nextIdx: i, status: "STOPPED_AT" };
+    }
+  }
+  const last = tu.stopTimeUpdates.length - 1;
+  return { prevIdx: last, nextIdx: last, status: "STOPPED_AT" };
 }

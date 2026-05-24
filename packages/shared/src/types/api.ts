@@ -13,7 +13,16 @@ export interface TrainPosition {
   nextStopName: string | null;
   destination: string;
   delay: number | null;
+  /** When this position record was last *computed* by the server. Used by
+   *  the client's freshness fade (≥300s old → 0.35 opacity). Bumps every
+   *  poll even if the underlying observation is older. */
   updatedAt: number;
+  /** Timestamp of the most recent GTFS-RT vehicle observation backing this
+   *  position, or `null` if the position derives purely from a trip update
+   *  with no matching vehicle entity. When non-null and older than
+   *  `updatedAt`, the position is schedule-extrapolated from the last
+   *  observation forward. See docs/adr/002. */
+  lastObservedAt: number | null;
 }
 
 /** Response from GET /api/trains */

@@ -21,6 +21,7 @@ function makeTrain(overrides: Partial<TrainPosition> = {}): TrainPosition {
     destination: "Uptown",
     delay: null,
     updatedAt: Math.floor(Date.now() / 1000),
+    lastObservedAt: Math.floor(Date.now() / 1000),
     ...overrides,
   };
 }

@@ -353,3 +353,238 @@ describe("prewarmInterpolator", () => {
     logSpy.mockRestore();
   });
 });
+
+/**
+ * Schedule-aware walk-forward past `currentStopId` (ADR 002).
+ *
+ * `estimateVehicle` used to clamp the time fraction to [0,1], so once `now`
+ * exceeded the vehicle's `currentStopId` scheduled arrival the train was
+ * frozen at that stop until MTA published a new vehicle entity. For LIRR,
+ * where vehicles only publish at stop transitions, that was minutes of
+ * stationary rendering followed by a visible teleport when the next stop
+ * landed in the feed.
+ *
+ * These tests pin the new behavior: when `now` is past `arriveNext`, the
+ * interpolator walks forward through the trip update's stop_time_updates
+ * to find the leg that actually contains `now`, then interpolates within
+ * that leg. The vehicle's `currentStopId` acts as a *lower bound* — we
+ * never walk backwards even if the schedule says we should be behind it.
+ */
+describe("estimateVehicle walk-forward past arriveNext", () => {
+  // 4 stops along a meridian, ~2.2km apart. Distances chosen so the
+  // along-shape interpolation produces predictable latitudes.
+  function makeGtfs(): StaticGtfsData {
+    return {
+      stops: {
+        S1: { stopId: "S1", stopName: "S1", lat: 40.75, lon: -73.99, parentStation: null },
+        S2: { stopId: "S2", stopName: "S2", lat: 40.77, lon: -73.99, parentStation: null },
+        S3: { stopId: "S3", stopName: "S3", lat: 40.79, lon: -73.99, parentStation: null },
+        S4: { stopId: "S4", stopName: "S4", lat: 40.81, lon: -73.99, parentStation: null },
+      },
+      routes: {
+        "1": { routeId: "1", shortName: "1", longName: "1", color: "000", textColor: "FFF" },
+      },
+      shapes: {
+        "sh-1": {
+          shapeId: "sh-1",
+          coordinates: [
+            [-73.99, 40.75],
+            [-73.99, 40.77],
+            [-73.99, 40.79],
+            [-73.99, 40.81],
+          ],
+        },
+      },
+      trips: {
+        "trip-1": {
+          tripId: "trip-1",
+          routeId: "1",
+          shapeId: "sh-1",
+          directionId: 0,
+          tripHeadsign: "S4",
+        },
+      },
+      stopSequences: {
+        "1-0-sh-1": [
+          { stopId: "S1", stopSequence: 1 },
+          { stopId: "S2", stopSequence: 2 },
+          { stopId: "S3", stopSequence: 3 },
+          { stopId: "S4", stopSequence: 4 },
+        ],
+      },
+      stopDistances: { "sh-1": { S1: 0, S2: 2.2, S3: 4.4, S4: 6.6 } },
+    };
+  }
+
+  function vehicle(currentStopId: string, ageSeconds = 30): ParsedVehicle {
+    return {
+      tripId: "trip-1",
+      routeId: "1",
+      directionId: 0,
+      currentStopSequence: 1,
+      currentStopId,
+      currentStatus: "IN_TRANSIT_TO",
+      timestamp: Math.floor(Date.now() / 1000) - ageSeconds,
+    };
+  }
+
+  type StuFixture = { stopId: string; arriveAt?: number; departAt?: number };
+
+  function tripUpdate(stops: StuFixture[]): ParsedTripUpdate {
+    return {
+      tripId: "trip-1",
+      routeId: "1",
+      directionId: 0,
+      stopTimeUpdates: stops.map((s, i) => ({
+        stopId: s.stopId,
+        stopSequence: i + 1,
+        arrival: s.arriveAt !== undefined ? { time: s.arriveAt, delay: 0 } : null,
+        departure:
+          s.departAt !== undefined
+            ? { time: s.departAt, delay: 0 }
+            : s.arriveAt !== undefined
+              ? { time: s.arriveAt + 30, delay: 0 }
+              : null,
+      })),
+    };
+  }
+
+  it("leaves mid-leg behavior unchanged when now is between prev-depart and next-arrive", () => {
+    // Vehicle says currentStopId = S2. now is between S1.departure and
+    // S2.arrival, so existing fraction-in-[0,1] logic applies.
+    const now = Math.floor(Date.now() / 1000);
+    const v = vehicle("S2");
+    const tu = tripUpdate([
+      { stopId: "S1", arriveAt: now - 300, departAt: now - 270 },
+      { stopId: "S2", arriveAt: now + 60 }, // heading here, ~30s into the leg
+      { stopId: "S3", arriveAt: now + 180 },
+      { stopId: "S4", arriveAt: now + 300 },
+    ]);
+
+    const trains = interpolatePositions([v], [tu], makeGtfs());
+
+    expect(trains).toHaveLength(1);
+    const t = trains[0];
+    // Position should be between S1 (40.75) and S2 (40.77), closer to S2.
+    expect(t.latitude).toBeGreaterThan(40.75);
+    expect(t.latitude).toBeLessThanOrEqual(40.77);
+    expect(t.currentStopId).toBe("S2");
+  });
+
+  it("walks forward 1 leg when now is past arriveNext", () => {
+    // Vehicle says currentStopId = S2, but now is ~30s past S2's scheduled
+    // departure and ~60s before S3's arrival. Walk-forward should advance
+    // the train into the [S2, S3] leg.
+    const now = Math.floor(Date.now() / 1000);
+    const v = vehicle("S2");
+    const tu = tripUpdate([
+      { stopId: "S1", arriveAt: now - 300, departAt: now - 270 },
+      { stopId: "S2", arriveAt: now - 60, departAt: now - 30 }, // already past
+      { stopId: "S3", arriveAt: now + 60 },
+      { stopId: "S4", arriveAt: now + 180 },
+    ]);
+
+    const trains = interpolatePositions([v], [tu], makeGtfs());
+
+    expect(trains).toHaveLength(1);
+    const t = trains[0];
+    // Past S2 (40.77), short of S3 (40.79).
+    expect(t.latitude).toBeGreaterThan(40.77);
+    expect(t.latitude).toBeLessThan(40.79);
+    // currentStopId in the output = the new "next" stop, S3.
+    expect(t.currentStopId).toBe("S3");
+    expect(t.nextStopId).toBe("S4");
+  });
+
+  it("walks forward multiple legs when way past the vehicle's currentStopId", () => {
+    // Vehicle still says S2 but now is past S3 too. Should land in [S3, S4].
+    const now = Math.floor(Date.now() / 1000);
+    const v = vehicle("S2");
+    const tu = tripUpdate([
+      { stopId: "S1", arriveAt: now - 600, departAt: now - 570 },
+      { stopId: "S2", arriveAt: now - 300, departAt: now - 270 },
+      { stopId: "S3", arriveAt: now - 60, departAt: now - 30 },
+      { stopId: "S4", arriveAt: now + 60 },
+    ]);
+
+    const trains = interpolatePositions([v], [tu], makeGtfs());
+
+    expect(trains).toHaveLength(1);
+    const t = trains[0];
+    // Past S3 (40.79), short of S4 (40.81).
+    expect(t.latitude).toBeGreaterThan(40.79);
+    expect(t.latitude).toBeLessThan(40.81);
+    expect(t.currentStopId).toBe("S4");
+    expect(t.nextStopId).toBeNull();
+  });
+
+  it("places the train at the final stop when now is past the end of the trip", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const v = vehicle("S2");
+    const tu = tripUpdate([
+      { stopId: "S1", arriveAt: now - 900 },
+      { stopId: "S2", arriveAt: now - 600 },
+      { stopId: "S3", arriveAt: now - 300 },
+      { stopId: "S4", arriveAt: now - 60 }, // final stop, already arrived
+    ]);
+
+    const trains = interpolatePositions([v], [tu], makeGtfs());
+
+    expect(trains).toHaveLength(1);
+    const t = trains[0];
+    expect(t.latitude).toBeCloseTo(40.81, 3);
+    expect(t.currentStopId).toBe("S4");
+    expect(t.nextStopId).toBeNull();
+  });
+
+  it("falls back to existing midpoint behavior when no trip update is available", () => {
+    // No trip update — there's nothing to walk forward through. Existing
+    // 0.5-fraction behavior between currentStopId and its predecessor stays.
+    const v = vehicle("S2");
+
+    const trains = interpolatePositions([v], [], makeGtfs());
+
+    expect(trains).toHaveLength(1);
+    const t = trains[0];
+    // Roughly midpoint between S1 (40.75) and S2 (40.77).
+    expect(t.latitude).toBeGreaterThan(40.755);
+    expect(t.latitude).toBeLessThan(40.765);
+    expect(t.currentStopId).toBe("S2");
+  });
+
+  it("preserves vehicle.timestamp as lastObservedAt even after walking forward", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const observedAt = now - 90;
+    const v: ParsedVehicle = { ...vehicle("S2"), timestamp: observedAt };
+    const tu = tripUpdate([
+      { stopId: "S1", arriveAt: now - 300, departAt: now - 270 },
+      { stopId: "S2", arriveAt: now - 60, departAt: now - 30 },
+      { stopId: "S3", arriveAt: now + 60 },
+      { stopId: "S4", arriveAt: now + 180 },
+    ]);
+
+    const trains = interpolatePositions([v], [tu], makeGtfs());
+
+    expect(trains).toHaveLength(1);
+    const t = trains[0];
+    // Walk-forward advanced the position — but the underlying observation
+    // is still 90s old. lastObservedAt reflects that, separate from updatedAt.
+    expect(t.lastObservedAt).toBe(observedAt);
+  });
+
+  it("sets lastObservedAt to null when the position derives purely from a trip update", () => {
+    // No vehicle entity, only a trip update — there's no real-time
+    // observation behind this position; it's purely schedule-derived.
+    const now = Math.floor(Date.now() / 1000);
+    const tu = tripUpdate([
+      { stopId: "S1", arriveAt: now - 60 },
+      { stopId: "S2", arriveAt: now + 60 },
+      { stopId: "S3", arriveAt: now + 180 },
+    ]);
+
+    const trains = interpolatePositions([], [tu], makeGtfs());
+
+    expect(trains).toHaveLength(1);
+    expect(trains[0].lastObservedAt).toBeNull();
+  });
+});
