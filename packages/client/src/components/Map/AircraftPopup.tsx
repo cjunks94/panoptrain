@@ -1,4 +1,4 @@
-import { Popup } from "react-map-gl/maplibre";
+import { forwardRef } from "react";
 import type { Aircraft } from "@panoptrain/shared";
 import {
   displayCallsign,
@@ -12,50 +12,68 @@ interface AircraftPopupProps {
   onClose: () => void;
 }
 
-/** Click-to-inspect popup for an aircraft. Uses react-map-gl's Popup for
- *  positioning rather than the custom DOM-pinning overlay TrainPopup uses
- *  — aircraft don't need per-frame interpolation, and the snap-each-poll
- *  motion is already legible as movement. Default Popup styling is light
- *  on a white background; we override via CSS-in-JS to match the dark
- *  theme of the rest of the UI. */
-export function AircraftPopup({ aircraft, onClose }: AircraftPopupProps) {
-  const title = displayCallsign(aircraft);
-  const isEmergency = aircraft.squawk === "7500" || aircraft.squawk === "7600" || aircraft.squawk === "7700";
+/** Click-to-inspect popup for an aircraft. Positioned each RAF tick via
+ *  direct DOM mutation in TransitMap (no React render per frame); content
+ *  React-renders only when the underlying Aircraft data changes per poll
+ *  (~8s). Mirrors the TrainPopup pattern so the popup tracks the dead-
+ *  reckoned marker instead of lagging up to ~1.5s during snap-back, which
+ *  it did under react-map-gl's `<Popup>` (re-rendered only on poll-snap
+ *  position changes).
+ *
+ *  Translucent dark background so the card blends with the dark basemap.
+ *  Initial off-screen position is overridden on the first RAF tick by
+ *  positionPopupOverlay in TransitMap. */
+export const AircraftPopup = forwardRef<HTMLDivElement, AircraftPopupProps>(
+  function AircraftPopup({ aircraft, onClose }, ref) {
+    const title = displayCallsign(aircraft);
+    const isEmergency =
+      aircraft.squawk === "7500" ||
+      aircraft.squawk === "7600" ||
+      aircraft.squawk === "7700";
 
-  return (
-    <Popup
-      className="aircraft-popup"
-      longitude={aircraft.longitude}
-      latitude={aircraft.latitude}
-      anchor="bottom"
-      offset={12}
-      closeButton={false}
-      closeOnClick={false}
-      onClose={onClose}
-      maxWidth="220px"
-    >
+    return (
       <div
+        ref={ref}
+        role="dialog"
+        aria-label={`Aircraft ${title} info`}
         style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          // Initial off-screen position; RAF overrides on first tick.
+          transform: "translate(-9999px, -9999px)",
+          zIndex: 5,
+          minWidth: 160,
+          maxWidth: 220,
+          padding: "8px 12px",
+          borderRadius: 6,
           background: "rgba(15, 23, 42, 0.95)",
           color: "#e2e8f0",
-          borderRadius: 6,
-          padding: "8px 12px",
-          minWidth: 160,
           fontSize: 12,
           lineHeight: 1.5,
+          boxShadow: "0 8px 24px rgba(0, 0, 0, 0.4)",
           border: `1px solid ${isEmergency ? "#ef4444" : "rgba(148, 163, 184, 0.3)"}`,
+          backdropFilter: "blur(6px)",
+          WebkitBackdropFilter: "blur(6px)",
+          pointerEvents: "auto",
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 4,
+          }}
+        >
           <strong style={{ fontSize: 13, color: "#fff" }}>{title}</strong>
+          {/* 44×44 hit area meets the project's mobile touch-target standard;
+              negative margin pulls the button into the popup's padding so
+              the popup doesn't grow to accommodate the larger button. */}
           <button
             onClick={onClose}
             aria-label="Close"
             style={{
-              // 44×44 hit area meets the project's mobile touch-target
-              // standard (matches TrainPopup); negative margin pulls
-              // the button into the popup's padding so the popup
-              // doesn't grow to accommodate the larger button.
               minWidth: 44,
               minHeight: 44,
               margin: "-8px -12px -8px 0",
@@ -86,30 +104,30 @@ export function AircraftPopup({ aircraft, onClose }: AircraftPopupProps) {
           />
         )}
       </div>
-      {/* Scoped via the .aircraft-popup className on the Popup root so we
-          don't unintentionally restyle other map popups (e.g. airport,
-          train) while this one is open. Mirrors the AirportPopup pattern
-          fixed in PR #40 review — AircraftPopup never got the same
-          treatment until this PR. */}
-      <style>{`
-        .aircraft-popup .maplibregl-popup-content {
-          background: transparent !important;
-          padding: 0 !important;
-          box-shadow: none !important;
-        }
-        .aircraft-popup .maplibregl-popup-tip {
-          border-top-color: rgba(15, 23, 42, 0.95) !important;
-        }
-      `}</style>
-    </Popup>
-  );
-}
+    );
+  },
+);
 
-function Row({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
+function Row({
+  label,
+  value,
+  valueColor,
+}: {
+  label: string;
+  value: string;
+  valueColor?: string;
+}) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
       <span style={{ color: "#94a3b8" }}>{label}</span>
-      <span style={{ color: valueColor ?? "#e2e8f0", fontVariantNumeric: "tabular-nums" }}>{value}</span>
+      <span
+        style={{
+          color: valueColor ?? "#e2e8f0",
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {value}
+      </span>
     </div>
   );
 }
