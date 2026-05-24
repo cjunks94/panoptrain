@@ -66,7 +66,23 @@ export const AircraftPopup = forwardRef<HTMLDivElement, AircraftPopupProps>(
             marginBottom: 4,
           }}
         >
-          <strong style={{ fontSize: 13, color: "#fff" }}>{title}</strong>
+          <strong
+            style={{
+              fontSize: 13,
+              color: "#fff",
+              // Flex children default to minWidth: auto which lets long
+              // unbroken text (some callsigns are 8+ chars) push the close
+              // button off the row. minWidth: 0 lets the title shrink, and
+              // the ellipsis combo keeps it readable when it does.
+              minWidth: 0,
+              flex: 1,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {title}
+          </strong>
           {/* 44×44 hit area meets the project's mobile touch-target standard;
               negative margin pulls the button into the popup's padding so
               the popup doesn't grow to accommodate the larger button. */}

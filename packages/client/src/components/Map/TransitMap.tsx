@@ -444,6 +444,12 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
         else aircraftPopupOverlayRef.current.style.display = "none";
       }
     };
+    // Call once on mount and on every popup-open: without this the popup
+    // sits at its initial off-screen transform until either the user moves
+    // the map or interpolateFrame next reports dirty. For a parked aircraft
+    // (no interpolation tick) or a stopped-at train that doesn't move, that
+    // can mean the popup never appears at all until interaction.
+    reposition();
     map.on("move", reposition);
     return () => {
       map.off("move", reposition);
@@ -458,7 +464,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     //
     // iconsReady flips true in onLoad, i.e. once the map genuinely exists,
     // so it is the correct re-run trigger.
-  }, [geojsonRef, aircraftGeojsonRef, iconsReady]);
+  }, [geojsonRef, aircraftGeojsonRef, iconsReady, popupTripId, popupAircraftHex]);
 
   // If the followed train falls out of the snapshot (5min stale eviction,
   // route filter, mode switch), clear follow so the camera doesn't lock to
