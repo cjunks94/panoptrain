@@ -1,0 +1,39 @@
+language: en-US
+# Repo-level CodeRabbit config. Complementary to multi-agent reviews
+# via Claude Code per CLAUDE.md, not a replacement.
+
+reviews:
+  # "chill" matches the profile CodeRabbit was already using as default
+  # — surfaces structural concerns and security issues without nit-spam.
+  profile: chill
+  # We resolve review feedback by discussion or follow-up commit; we
+  # don't want CR auto-blocking merges with formal "Request Changes".
+  request_changes_workflow: false
+  auto_review:
+    enabled: true
+    # Drafts often land mid-iteration (red commits of TDD-split PRs); skip
+    # them to avoid two reviews of the same PR.
+    drafts: false
+  path_instructions:
+    - path: "docs/adr/**"
+      instructions: |
+        These are Architectural Decision Records — narrative documents,
+        not code. Skip style/prose nits. Flag only factual inconsistencies
+        with the codebase, unclear status, or contradictions with prior
+        ADRs.
+    - path: "packages/e2e/**"
+      instructions: |
+        Upstream APIs (MTA, adsb.lol, aviationweather) are mocked
+        server-side via MSW handlers in packages/server/src/test-mocks.ts,
+        loaded by packages/server/src/index-e2e.ts. Flag any introduction
+        of Playwright page.route() for upstream mocking — that pattern
+        bypasses real server logic and was specifically removed.
+    - path: "packages/server/src/services/*-poller.ts"
+      instructions: |
+        Pollers follow a cache-with-TTL-fallback shape — startXPolling,
+        stopXPolling, getCurrentXSnapshot, _resetXCache. New pollers
+        should mirror metar-poller. Flag any divergence from this
+        pattern without justification in code or PR description.
+
+chat:
+  auto_reply: true
