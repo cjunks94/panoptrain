@@ -1,5 +1,7 @@
 import type { TafPeriod, TafReport, TafsResponse } from "@panoptrain/shared";
 import { AIRPORTS } from "@panoptrain/shared";
+import { consoleLogger } from "../lib/logger.js";
+import { createSnapshotPoller, fetchWithRetry, type SnapshotPoller } from "./base-poller.js";
 
 /**
  * TAF poller — terminal aerodrome forecasts from aviationweather.gov
@@ -11,9 +13,6 @@ import { AIRPORTS } from "@panoptrain/shared";
  * forecast. Polling every 30 minutes catches amendments within a
  * useful window without thrashing the upstream — TAFs change far less
  * frequently than METARs.
- *
- * aviationweather.gov etiquette mirrors the METAR poller: identifiable
- * User-Agent, JSON format only.
  */
 const AVIATIONWEATHER_BASE = "https://aviationweather.gov/api/data/taf";
 const USER_AGENT = "panoptrain/0.1.0 (contact: cjunks94@gmail.com)";
@@ -25,19 +24,13 @@ const RETRY_DELAYS_MS = [0, 1_000, 3_000];
  *  if it's still technically within validity. */
 const CACHE_TTL_MS = 8 * 60 * 60 * 1000;
 
-let interval: ReturnType<typeof setInterval> | undefined;
-let snapshot: TafsResponse | null = null;
-let cached: { snapshot: TafsResponse; cachedAt: number } | null = null;
-
 const ALL_ICAO = AIRPORTS.map((a) => a.icao);
 
 /** Raw record shape from aviationweather.gov's /api/data/taf endpoint
  *  with format=json. We declare only the fields we read. */
 interface AwxTafRecord {
   icaoId?: string;
-  /** ISO 8601 timestamp string. */
   issueTime?: string;
-  /** Unix seconds. */
   validTimeFrom?: number;
   validTimeTo?: number;
   rawTAF?: string;
@@ -45,10 +38,8 @@ interface AwxTafRecord {
 }
 
 interface AwxTafForecast {
-  /** Unix seconds. */
   timeFrom?: number;
   timeTo?: number;
-  /** "FM" | "TEMPO" | "BECMG" | "PROB" | null */
   fcstChange?: string | null;
   probability?: number | null;
   wdir?: number | string | null;
@@ -62,8 +53,6 @@ interface AwxTafForecast {
 function parseVisibility(visib: AwxTafForecast["visib"]): number | null {
   if (visib === undefined || visib === null) return null;
   if (typeof visib === "number") return visib;
-  // "P6SM" surfaces from raw TAF parsing as the numeric "6+" / similar.
-  // The JSON feed sometimes ships strings; handle the common cases.
   if (visib === "P6SM" || visib === "6+") return 6;
   const slash = visib.indexOf("/");
   if (slash > 0) {
@@ -78,7 +67,6 @@ function parseVisibility(visib: AwxTafForecast["visib"]): number | null {
 function parseDirection(wdir: AwxTafForecast["wdir"]): number | null {
   if (wdir === undefined || wdir === null) return null;
   if (typeof wdir === "number") return wdir;
-  // "VRB" and other strings — null is the right "no fixed direction" signal.
   return null;
 }
 
@@ -104,7 +92,6 @@ const VALID_CHANGES = new Set(["FM", "TEMPO", "BECMG", "PROB"]);
 function parseChange(c: AwxTafForecast["fcstChange"]): TafPeriod["fcstChange"] {
   if (!c) return null;
   const upper = c.toUpperCase();
-  // PROB30/PROB40 surface as "PROB" with a probability number alongside.
   if (upper.startsWith("PROB")) return "PROB";
   return VALID_CHANGES.has(upper) ? (upper as TafPeriod["fcstChange"]) : null;
 }
@@ -113,9 +100,6 @@ function parseForecast(f: AwxTafForecast): TafPeriod | null {
   if (typeof f.timeFrom !== "number" || typeof f.timeTo !== "number") return null;
   const wspdParsed = typeof f.wspd === "number" ? f.wspd : null;
   const wdirParsed = parseDirection(f.wdir);
-  // Suppress wind block when neither speed nor direction is present —
-  // the upstream omits them on overlay groups (TEMPO/BECMG) that don't
-  // change wind from the base period.
   const wind = wspdParsed === null && wdirParsed === null
     ? null
     : {
@@ -163,8 +147,6 @@ export function parseTafResponse(records: AwxTafRecord[], now: number = Date.now
     const parsed = parseRecord(rec);
     if (parsed) reports[parsed.icao] = parsed;
   }
-  // Source timestamp = the latest issue time we have. Beats Date.now()
-  // because TAFs publish on the 6h cycle.
   let latestIssued = 0;
   for (const r of Object.values(reports)) {
     if (r.issuedAt > latestIssued) latestIssued = r.issuedAt;
@@ -177,66 +159,42 @@ export function parseTafResponse(records: AwxTafRecord[], now: number = Date.now
   };
 }
 
-export async function fetchTafSnapshot(): Promise<TafsResponse> {
+export async function fetchTafSnapshot(signal?: AbortSignal): Promise<TafsResponse> {
   const url = `${AVIATIONWEATHER_BASE}?ids=${ALL_ICAO.join(",")}&format=json`;
-  let lastErr: unknown = null;
-  for (let attempt = 0; attempt < RETRY_DELAYS_MS.length; attempt++) {
-    if (RETRY_DELAYS_MS[attempt] > 0) {
-      await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
-    }
-    try {
-      const res = await fetch(url, {
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-        headers: { "User-Agent": USER_AGENT, accept: "application/json" },
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const records = (await res.json()) as AwxTafRecord[];
-      return parseTafResponse(records);
-    } catch (err) {
-      lastErr = err;
-    }
-  }
-  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+  const records = await fetchWithRetry<AwxTafRecord[]>({
+    url,
+    parse: async (r) => (await r.json()) as AwxTafRecord[],
+    headers: { "User-Agent": USER_AGENT, accept: "application/json" },
+    timeoutMs: FETCH_TIMEOUT_MS,
+    retryDelaysMs: RETRY_DELAYS_MS,
+    signal,
+  });
+  return parseTafResponse(records);
 }
 
-async function pollOnce(): Promise<void> {
-  try {
-    const next = await fetchTafSnapshot();
-    snapshot = next;
-    cached = { snapshot: next, cachedAt: next.timestamp };
-    console.log(`[taf] ok, ${Object.keys(next.reports).length} reports`);
-  } catch (err) {
-    if (cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
-      const ageMin = Math.round((Date.now() - cached.cachedAt) / 60_000);
-      console.warn(
-        `[taf] fetch failed (${err}); reusing cached snapshot from ${ageMin}m ago`,
-      );
-      snapshot = { ...cached.snapshot, source: "cached", timestamp: Date.now() };
-    } else {
-      console.warn(`[taf] fetch failed (${err}); no usable cache`);
-      snapshot = null;
-    }
-  }
-}
+const poller: SnapshotPoller<TafsResponse> = createSnapshotPoller<TafsResponse>({
+  name: "taf",
+  fetchSnapshot: (signal) => fetchTafSnapshot(signal),
+  cacheTtlMs: CACHE_TTL_MS,
+  logger: consoleLogger,
+  toCached: (s) => ({ ...s, source: "cached", timestamp: Date.now() }),
+  formatStats: (s) => `${Object.keys(s.reports).length} reports`,
+});
 
 export function startTafPolling(intervalMs: number): void {
-  stopTafPolling();
-  console.log(`Starting TAF polling every ${intervalMs / 60_000}m...`);
-  pollOnce();
-  interval = setInterval(pollOnce, intervalMs);
+  consoleLogger.info("starting poller", { poller: "taf", intervalMs });
+  poller.start(intervalMs);
 }
 
 export function stopTafPolling(): void {
-  if (interval) clearInterval(interval);
-  interval = undefined;
+  poller.stop();
 }
 
 export function getCurrentTafSnapshot(): TafsResponse | null {
-  return snapshot;
+  return poller.getCurrent();
 }
 
 /** Test-only — production code never calls this. */
 export function _resetTafCache(): void {
-  snapshot = null;
-  cached = null;
+  poller.__TEST_INTERNALS__.reset();
 }

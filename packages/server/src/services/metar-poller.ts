@@ -1,5 +1,7 @@
 import type { FlightCategory, MetarReport, MetarsResponse } from "@panoptrain/shared";
 import { AIRPORTS } from "@panoptrain/shared";
+import { consoleLogger } from "../lib/logger.js";
+import { createSnapshotPoller, fetchWithRetry, type SnapshotPoller } from "./base-poller.js";
 
 /**
  * METAR poller — current-weather observations from aviationweather.gov for
@@ -11,12 +13,6 @@ import { AIRPORTS } from "@panoptrain/shared";
  * faster wastes upstream cycles for no fresher data; we batch all 11
  * airports into one API call every 15 minutes — fast enough to catch
  * special reports (SPECI) without thrashing the upstream.
- *
- * aviationweather.gov etiquette:
- *  - Identify with a useful User-Agent — they monitor for abusive
- *    clients and block them.
- *  - Use the JSON format, not raw text scraping. The JSON endpoint is
- *    explicitly the recommended programmatic interface.
  */
 const AVIATIONWEATHER_BASE = "https://aviationweather.gov/api/data/metar";
 const USER_AGENT = "panoptrain/0.1.0 (contact: cjunks94@gmail.com)";
@@ -26,17 +22,10 @@ const RETRY_DELAYS_MS = [0, 1_000, 3_000];
  *  upstream outage doesn't blank the popup mid-flight. */
 const CACHE_TTL_MS = 2 * 60 * 60 * 1000;
 
-let interval: ReturnType<typeof setInterval> | undefined;
-let snapshot: MetarsResponse | null = null;
-let cached: { snapshot: MetarsResponse; cachedAt: number } | null = null;
-
 const ALL_ICAO = AIRPORTS.map((a) => a.icao);
 
 /** Raw record shape from aviationweather.gov's /api/data/metar endpoint
- *  with format=json. We declare only the fields we read; the upstream
- *  ships ~30 fields per record but most of them duplicate the parsed
- *  signal already present elsewhere or relate to upper-air data we
- *  don't surface. */
+ *  with format=json. We declare only the fields we read. */
 interface AwxMetarRecord {
   icaoId?: string;
   obsTime?: number;
@@ -45,22 +34,16 @@ interface AwxMetarRecord {
   /** Wind direction, true degrees 0-360. Some records ship "VRB" as a
    *  string for variable wind; we treat that as null. */
   wdir?: number | string;
-  /** Knots. Always numeric in the feed. */
   wspd?: number;
-  /** Knots. Null/undefined when no gusts reported. */
   wgst?: number;
   /** Statute miles. Sometimes a literal string like "10+" or "1/2"
-   *  for unlimited / fractional values. Numeric when straightforward. */
+   *  for unlimited / fractional values. */
   visib?: number | string;
-  /** Celsius. */
   temp?: number;
   dewp?: number;
-  /** hPa (millibars). The raw METAR text encodes inHg in "Annnn" form;
-   *  the parsed JSON gives us the metric form numerically. We convert
-   *  to inHg at the boundary because that's the US flight-ops convention. */
+  /** hPa (millibars). We convert to inHg at the boundary because that's
+   *  the US flight-ops convention. */
   altim?: number;
-  /** Cloud layers, lowest to highest. Used to derive ceiling — the
-   *  lowest broken/overcast base. */
   clouds?: Array<{ cover?: string; base?: number }>;
 }
 
@@ -69,7 +52,6 @@ const HPA_TO_INHG = 0.02953;
 function parseVisibility(visib: AwxMetarRecord["visib"]): number | null {
   if (visib === undefined || visib === null) return null;
   if (typeof visib === "number") return visib;
-  // "10+" → 10. "1/2" → 0.5. Otherwise try a numeric parse and bail.
   if (visib === "10+") return 10;
   const slash = visib.indexOf("/");
   if (slash > 0) {
@@ -84,8 +66,6 @@ function parseVisibility(visib: AwxMetarRecord["visib"]): number | null {
 function parseDirection(wdir: AwxMetarRecord["wdir"]): number | null {
   if (wdir === undefined || wdir === null) return null;
   if (typeof wdir === "number") return wdir;
-  // "VRB" (variable) and other non-numeric shapes — null is the right
-  // signal for "no fixed direction".
   return null;
 }
 
@@ -155,66 +135,42 @@ export function parseMetarResponse(records: AwxMetarRecord[], now: number = Date
   };
 }
 
-export async function fetchMetarSnapshot(): Promise<MetarsResponse> {
+export async function fetchMetarSnapshot(signal?: AbortSignal): Promise<MetarsResponse> {
   const url = `${AVIATIONWEATHER_BASE}?ids=${ALL_ICAO.join(",")}&format=json`;
-  let lastErr: unknown = null;
-  for (let attempt = 0; attempt < RETRY_DELAYS_MS.length; attempt++) {
-    if (RETRY_DELAYS_MS[attempt] > 0) {
-      await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
-    }
-    try {
-      const res = await fetch(url, {
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-        headers: { "User-Agent": USER_AGENT, accept: "application/json" },
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const records = (await res.json()) as AwxMetarRecord[];
-      return parseMetarResponse(records);
-    } catch (err) {
-      lastErr = err;
-    }
-  }
-  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+  const records = await fetchWithRetry<AwxMetarRecord[]>({
+    url,
+    parse: async (r) => (await r.json()) as AwxMetarRecord[],
+    headers: { "User-Agent": USER_AGENT, accept: "application/json" },
+    timeoutMs: FETCH_TIMEOUT_MS,
+    retryDelaysMs: RETRY_DELAYS_MS,
+    signal,
+  });
+  return parseMetarResponse(records);
 }
 
-async function pollOnce(): Promise<void> {
-  try {
-    const next = await fetchMetarSnapshot();
-    snapshot = next;
-    cached = { snapshot: next, cachedAt: next.timestamp };
-    console.log(`[metar] ok, ${Object.keys(next.reports).length} reports`);
-  } catch (err) {
-    if (cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
-      const ageMin = Math.round((Date.now() - cached.cachedAt) / 60_000);
-      console.warn(
-        `[metar] fetch failed (${err}); reusing cached snapshot from ${ageMin}m ago`,
-      );
-      snapshot = { ...cached.snapshot, source: "cached", timestamp: Date.now() };
-    } else {
-      console.warn(`[metar] fetch failed (${err}); no usable cache`);
-      snapshot = null;
-    }
-  }
-}
+const poller: SnapshotPoller<MetarsResponse> = createSnapshotPoller<MetarsResponse>({
+  name: "metar",
+  fetchSnapshot: (signal) => fetchMetarSnapshot(signal),
+  cacheTtlMs: CACHE_TTL_MS,
+  logger: consoleLogger,
+  toCached: (s) => ({ ...s, source: "cached", timestamp: Date.now() }),
+  formatStats: (s) => `${Object.keys(s.reports).length} reports`,
+});
 
 export function startMetarPolling(intervalMs: number): void {
-  stopMetarPolling();
-  console.log(`Starting METAR polling every ${intervalMs / 60_000}m...`);
-  pollOnce();
-  interval = setInterval(pollOnce, intervalMs);
+  consoleLogger.info("starting poller", { poller: "metar", intervalMs });
+  poller.start(intervalMs);
 }
 
 export function stopMetarPolling(): void {
-  if (interval) clearInterval(interval);
-  interval = undefined;
+  poller.stop();
 }
 
 export function getCurrentMetarSnapshot(): MetarsResponse | null {
-  return snapshot;
+  return poller.getCurrent();
 }
 
 /** Test-only — production code never calls this. */
 export function _resetMetarCache(): void {
-  snapshot = null;
-  cached = null;
+  poller.__TEST_INTERNALS__.reset();
 }

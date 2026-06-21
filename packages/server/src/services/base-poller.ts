@@ -42,8 +42,58 @@ export interface FetchWithRetryOptions<T> {
   signal?: AbortSignal;
 }
 
-export async function fetchWithRetry<T>(_opts: FetchWithRetryOptions<T>): Promise<T> {
-  throw new Error("Not implemented");
+function abortReason(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new Error(typeof signal.reason === "string" ? signal.reason : "aborted");
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortReason(signal));
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    if (signal) {
+      signal.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timer);
+          reject(abortReason(signal));
+        },
+        { once: true },
+      );
+    }
+  });
+}
+
+export async function fetchWithRetry<T>(opts: FetchWithRetryOptions<T>): Promise<T> {
+  const { url, parse, headers, timeoutMs, retryDelaysMs, signal } = opts;
+  let lastErr: unknown = null;
+
+  for (let attempt = 0; attempt < retryDelaysMs.length; attempt++) {
+    if (signal?.aborted) throw abortReason(signal);
+    const delay = retryDelaysMs[attempt] ?? 0;
+    if (delay > 0) await sleep(delay, signal); // throws on abort
+
+    try {
+      const timeoutSig = AbortSignal.timeout(timeoutMs);
+      const composed = signal ? AbortSignal.any([signal, timeoutSig]) : timeoutSig;
+      const res = await fetch(url, { signal: composed, ...(headers ? { headers } : {}) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await parse(res);
+    } catch (err) {
+      if (signal?.aborted) throw abortReason(signal);
+      lastErr = err;
+    }
+  }
+
+  // Preserve underlying message in `.message` so existing regex assertions
+  // (.rejects.toThrow(/HTTP 503/)) keep working; pin the original on `.cause`
+  // so callers can chain to root cause without string-parsing.
+  const baseMsg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+  throw new Error(baseMsg, { cause: lastErr });
 }
 
 export interface SnapshotPollerConfig<T> {
@@ -85,6 +135,62 @@ export interface SnapshotPoller<T> {
   __TEST_INTERNALS__: { reset(): void };
 }
 
-export function createSnapshotPoller<T>(_config: SnapshotPollerConfig<T>): SnapshotPoller<T> {
-  throw new Error("Not implemented");
+export function createSnapshotPoller<T>(config: SnapshotPollerConfig<T>): SnapshotPoller<T> {
+  const { name, fetchSnapshot, cacheTtlMs, logger, toCached, formatStats } = config;
+
+  let snapshot: T | null = null;
+  let cached: { snapshot: T; cachedAt: number } | null = null;
+  let interval: ReturnType<typeof setInterval> | undefined;
+  let abortController: AbortController | null = null;
+
+  async function pollOnce(): Promise<void> {
+    abortController = new AbortController();
+    const signal = abortController.signal;
+    const startTime = Date.now();
+
+    try {
+      const next = await fetchSnapshot(signal);
+      snapshot = next;
+      cached = { snapshot: next, cachedAt: Date.now() };
+      const stats = formatStats?.(next);
+      logger.info("poll ok", {
+        poller: name,
+        durationMs: Date.now() - startTime,
+        ...(stats ? { stats } : {}),
+      });
+    } catch (err) {
+      if (cached && Date.now() - cached.cachedAt < cacheTtlMs) {
+        const cacheAgeMs = Date.now() - cached.cachedAt;
+        snapshot = toCached ? toCached(cached.snapshot) : cached.snapshot;
+        logger.warn("cache fallback", { poller: name, err, cacheAgeMs });
+      } else {
+        snapshot = null;
+        cached = null;
+        logger.warn("poll failed, no cache", { poller: name, err });
+      }
+    }
+  }
+
+  return {
+    start(intervalMs: number) {
+      if (interval) clearInterval(interval);
+      void pollOnce();
+      interval = setInterval(() => void pollOnce(), intervalMs);
+    },
+    stop() {
+      if (interval) {
+        clearInterval(interval);
+        interval = undefined;
+      }
+      abortController?.abort(new Error("poller stopped"));
+    },
+    pollOnce,
+    getCurrent: () => snapshot,
+    __TEST_INTERNALS__: {
+      reset() {
+        snapshot = null;
+        cached = null;
+      },
+    },
+  };
 }
