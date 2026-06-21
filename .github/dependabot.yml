@@ -20,6 +20,15 @@ updates:
         update-types:
           - "patch"
           - "minor"
+    ignore:
+      # @types/node is held to the major version of our runtime Node.
+      # Runtime is Node 22 (see Dockerfile); types ahead of runtime risk
+      # silently typing Node 23+ stdlib APIs that crash on Node 22. CI
+      # runs on Node 22 too, but coverage-gap paths could slip through.
+      # Re-evaluate this cap when bumping the Dockerfile node base image.
+      - dependency-name: "@types/node"
+        update-types:
+          - "version-update:semver-major"
     commit-message:
       prefix: "chore(deps)"
       include: "scope"
