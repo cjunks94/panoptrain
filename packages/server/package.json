@@ -14,7 +14,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@hono/node-server": "^1.13.0",
+    "@hono/node-server": "^2.0.5",
     "@panoptrain/shared": "workspace:*",
     "@turf/along": "^7.3.5",
     "@turf/bearing": "^7.3.5",
