@@ -54,14 +54,14 @@ importers:
         specifier: ^4.3.0
         version: 4.7.0(vite@6.4.2(@types/node@22.19.17)(tsx@4.22.4))
       typescript:
-        specifier: ^5.6.0
-        version: 5.9.3
+        specifier: ^6.0.3
+        version: 6.0.3
       vite:
         specifier: ^6.0.0
         version: 6.4.2(@types/node@22.19.17)(tsx@4.22.4)
       vitest:
         specifier: ^4.1.9
-        version: 4.1.9(@types/node@22.19.17)(msw@2.14.6(@types/node@22.19.17)(typescript@5.9.3))(vite@6.4.2(@types/node@22.19.17)(tsx@4.22.4))
+        version: 4.1.9(@types/node@22.19.17)(msw@2.14.6(@types/node@22.19.17)(typescript@6.0.3))(vite@6.4.2(@types/node@22.19.17)(tsx@4.22.4))
 
   packages/e2e:
     devDependencies:
@@ -125,16 +125,16 @@ importers:
         version: 22.19.17
       msw:
         specifier: ^2.14.6
-        version: 2.14.6(@types/node@22.19.17)(typescript@5.9.3)
+        version: 2.14.6(@types/node@22.19.17)(typescript@6.0.3)
       tsx:
         specifier: ^4.22.4
         version: 4.22.4
       typescript:
-        specifier: ^5.6.0
-        version: 5.9.3
+        specifier: ^6.0.3
+        version: 6.0.3
       vitest:
         specifier: ^4.1.9
-        version: 4.1.9(@types/node@22.19.17)(msw@2.14.6(@types/node@22.19.17)(typescript@5.9.3))(vite@6.4.2(@types/node@22.19.17)(tsx@4.22.4))
+        version: 4.1.9(@types/node@22.19.17)(msw@2.14.6(@types/node@22.19.17)(typescript@6.0.3))(vite@6.4.2(@types/node@22.19.17)(tsx@4.22.4))
 
   packages/shared:
     dependencies:
@@ -143,8 +143,8 @@ importers:
         version: 3.25.76
     devDependencies:
       typescript:
-        specifier: ^5.6.0
-        version: 5.9.3
+        specifier: ^6.0.3
+        version: 6.0.3
 
 packages:
 
@@ -1760,8 +1760,8 @@ packages:
     resolution: {integrity: sha512-8ZiHFm91orbSAe2PSAiSVBVko18pbhbiB3U9GglSzF/zCGkR+rxpHx6sEMCUm4kxY4LjDIUGgCfUMtwfZfjfUA==}
     engines: {node: '>=20'}
 
-  typescript@5.9.3:
-    resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
+  typescript@6.0.3:
+    resolution: {integrity: sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==}
     engines: {node: '>=14.17'}
     hasBin: true
 
@@ -2623,13 +2623,13 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.1.0
 
-  '@vitest/mocker@4.1.9(msw@2.14.6(@types/node@22.19.17)(typescript@5.9.3))(vite@6.4.2(@types/node@22.19.17)(tsx@4.22.4))':
+  '@vitest/mocker@4.1.9(msw@2.14.6(@types/node@22.19.17)(typescript@6.0.3))(vite@6.4.2(@types/node@22.19.17)(tsx@4.22.4))':
     dependencies:
       '@vitest/spy': 4.1.9
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      msw: 2.14.6(@types/node@22.19.17)(typescript@5.9.3)
+      msw: 2.14.6(@types/node@22.19.17)(typescript@6.0.3)
       vite: 6.4.2(@types/node@22.19.17)(tsx@4.22.4)
 
   '@vitest/pretty-format@4.1.9':
@@ -3140,7 +3140,7 @@ snapshots:
 
   ms@2.1.3: {}
 
-  msw@2.14.6(@types/node@22.19.17)(typescript@5.9.3):
+  msw@2.14.6(@types/node@22.19.17)(typescript@6.0.3):
     dependencies:
       '@inquirer/confirm': 6.0.13(@types/node@22.19.17)
       '@mswjs/interceptors': 0.41.9
@@ -3161,7 +3161,7 @@ snapshots:
       until-async: 3.0.2
       yargs: 17.7.2
     optionalDependencies:
-      typescript: 5.9.3
+      typescript: 6.0.3
     transitivePeerDependencies:
       - '@types/node'
 
@@ -3476,7 +3476,7 @@ snapshots:
     dependencies:
       tagged-tag: 1.0.0
 
-  typescript@5.9.3: {}
+  typescript@6.0.3: {}
 
   typewise-core@1.2.0: {}
 
@@ -3522,10 +3522,10 @@ snapshots:
       fsevents: 2.3.3
       tsx: 4.22.4
 
-  vitest@4.1.9(@types/node@22.19.17)(msw@2.14.6(@types/node@22.19.17)(typescript@5.9.3))(vite@6.4.2(@types/node@22.19.17)(tsx@4.22.4)):
+  vitest@4.1.9(@types/node@22.19.17)(msw@2.14.6(@types/node@22.19.17)(typescript@6.0.3))(vite@6.4.2(@types/node@22.19.17)(tsx@4.22.4)):
     dependencies:
       '@vitest/expect': 4.1.9
-      '@vitest/mocker': 4.1.9(msw@2.14.6(@types/node@22.19.17)(typescript@5.9.3))(vite@6.4.2(@types/node@22.19.17)(tsx@4.22.4))
+      '@vitest/mocker': 4.1.9(msw@2.14.6(@types/node@22.19.17)(typescript@6.0.3))(vite@6.4.2(@types/node@22.19.17)(tsx@4.22.4))
       '@vitest/pretty-format': 4.1.9
       '@vitest/runner': 4.1.9
       '@vitest/snapshot': 4.1.9
