@@ -51,6 +51,55 @@ export function isTransientNoSnapshotError(err: unknown): boolean {
   return msg.startsWith("API 503");
 }
 
-export function createBulkPoller<TData>(_config: CreateBulkPollerConfig<TData>): BulkPoller {
-  throw new Error("Not implemented");
+export function createBulkPoller<TData>(config: CreateBulkPollerConfig<TData>): BulkPoller {
+  const { fetch: fetchFn, initialData, intervalMs, inFlightGuard = false, onState } = config;
+
+  let interval: ReturnType<typeof setInterval> | undefined;
+  let stopped = false;
+  let inFlight = false;
+  // Track current data so non-503 errors can preserve the last good value
+  // — popups stay populated with stale-but-useful data while we surface
+  // the error separately. 503 (cold start) resets to initialData.
+  let currentData: TData = initialData;
+  let currentSource: "live" | "cached" | null = null;
+
+  async function pollOnce(): Promise<void> {
+    if (stopped) return;
+    if (inFlightGuard && inFlight) return;
+    inFlight = true;
+    try {
+      const res = await fetchFn();
+      if (stopped) return;
+      currentData = res.data;
+      currentSource = res.source;
+      onState({ data: currentData, source: currentSource, error: null });
+    } catch (err) {
+      if (stopped) return;
+      if (isTransientNoSnapshotError(err)) {
+        currentData = initialData;
+        currentSource = null;
+        onState({ data: currentData, source: currentSource, error: null });
+      } else {
+        const error = err instanceof Error ? err : new Error(String(err));
+        onState({ data: currentData, source: currentSource, error });
+      }
+    } finally {
+      inFlight = false;
+    }
+  }
+
+  return {
+    start() {
+      stopped = false;
+      void pollOnce();
+      interval = setInterval(() => void pollOnce(), intervalMs);
+    },
+    stop() {
+      stopped = true;
+      if (interval) {
+        clearInterval(interval);
+        interval = undefined;
+      }
+    },
+  };
 }

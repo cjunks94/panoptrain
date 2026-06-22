@@ -1,4 +1,5 @@
-import type { PollingState } from "../lib/bulkPolling.js";
+import { useEffect, useRef, useState } from "react";
+import { createBulkPoller, type PollingState } from "../lib/bulkPolling.js";
 
 /**
  * React adapter for `createBulkPoller`. Owns the React state + useEffect
@@ -17,6 +18,38 @@ export interface UseBulkPollingOptions<TData> {
 
 export type UseBulkPollingResult<TData> = PollingState<TData>;
 
-export function useBulkPollingEndpoint<TData>(_opts: UseBulkPollingOptions<TData>): UseBulkPollingResult<TData> {
-  throw new Error("Not implemented");
+export function useBulkPollingEndpoint<TData>(opts: UseBulkPollingOptions<TData>): UseBulkPollingResult<TData> {
+  const { fetch: fetchFn, initialData, intervalMs, inFlightGuard, enabled } = opts;
+
+  const [state, setState] = useState<PollingState<TData>>({
+    data: initialData,
+    source: null,
+    error: null,
+  });
+
+  // The fetch closure may capture fresh callsite values each render; route
+  // through a ref so we don't tear down the poller on every render.
+  const fetchRef = useRef(fetchFn);
+  fetchRef.current = fetchFn;
+  // initialData is captured on first render and held stable for the hook's
+  // lifetime — useRef's argument is ignored after first render.
+  const initialDataRef = useRef(initialData);
+
+  useEffect(() => {
+    if (!enabled) {
+      setState({ data: initialDataRef.current, source: null, error: null });
+      return;
+    }
+    const poller = createBulkPoller<TData>({
+      fetch: () => fetchRef.current(),
+      initialData: initialDataRef.current,
+      intervalMs,
+      inFlightGuard,
+      onState: setState,
+    });
+    poller.start();
+    return () => poller.stop();
+  }, [enabled, intervalMs, inFlightGuard]);
+
+  return state;
 }
