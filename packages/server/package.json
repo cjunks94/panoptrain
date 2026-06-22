@@ -21,7 +21,7 @@
     "@turf/helpers": "^7.3.5",
     "@turf/length": "^7.3.5",
     "@turf/nearest-point-on-line": "^7.3.5",
-    "csv-parse": "^6.2.1",
+    "csv-parse": "^7.0.0",
     "dotenv": "^17.4.2",
     "gtfs-realtime-bindings": "^2.0.0",
     "hono": "^4.12.26",
