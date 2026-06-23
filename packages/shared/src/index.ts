@@ -52,5 +52,33 @@ export { AIRPORTS } from "./constants/airports.js";
 export type { Airport, Runway, RunwaySurface, Frequencies } from "./constants/airports.js";
 
 // Schemas
-export { TrainPositionSchema, TrainsResponseSchema } from "./schemas/api.schema.js";
+export {
+  TrainPositionSchema,
+  TrainsResponseSchema,
+  RouteFeatureSchema,
+  RoutesGeoJSONSchema,
+  StopFeatureSchema,
+  StopsGeoJSONSchema,
+  DelayInfoSchema,
+  RideSegmentSchema,
+  TransferSegmentSchema,
+  TripPlanSchema,
+  PlanResponseSchema,
+  LirrRideSegmentSchema,
+  LirrTransferSegmentSchema,
+  LirrTripPlanSchema,
+  LirrPlanResponseSchema,
+} from "./schemas/api.schema.js";
 export { AircraftSchema, AirspaceResponseSchema } from "./schemas/airspace.schema.js";
+export {
+  FlightCategorySchema,
+  MetarWindSchema,
+  MetarReportSchema,
+  MetarsResponseSchema,
+} from "./schemas/metar.schema.js";
+export {
+  TafWindSchema,
+  TafPeriodSchema,
+  TafReportSchema,
+  TafsResponseSchema,
+} from "./schemas/taf.schema.js";

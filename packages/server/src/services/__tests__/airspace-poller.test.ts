@@ -139,4 +139,20 @@ describe("airspace-poller fetch & fallback", () => {
     await vi.advanceTimersByTimeAsync(3_000);
     await expect(promise).rejects.toThrow(/upstream gone/);
   });
+
+  it("rejects malformed upstream payloads via the Zod schema at the parse boundary (#86)", async () => {
+    // `ac` declared as array; upstream returns a string instead. fetchWithRetry
+    // should treat the Zod failure as a fetch error → retry → exhaust → throw.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ac: "should-be-an-array", now: 1 }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const { fetchAircraftSnapshot } = await import("../airspace-poller.js");
+    const promise = fetchAircraftSnapshot();
+    promise.catch(() => {});
+    await vi.advanceTimersByTimeAsync(3_000);
+    await expect(promise).rejects.toThrow();
+  });
 });
