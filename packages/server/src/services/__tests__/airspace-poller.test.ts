@@ -9,8 +9,8 @@ import { AircraftSchema } from "@panoptrain/shared";
  *     poller, so we use the same mock-fetch approach.
  *
  * The poller module keeps in-process state (snapshot + cache); we reset
- * via `_resetAirspaceCache` in `beforeEach` and re-import via vi.resetModules
- * for tests that exercise the singleton interval state.
+ * via `__TEST_INTERNALS__.reset()` in `beforeEach` and re-import via
+ * vi.resetModules for tests that exercise the singleton interval state.
  */
 describe("parseAdsbLolResponse", () => {
   it("maps adsb.lol fields onto Aircraft, computing seenAt from now-seen", async () => {
@@ -96,7 +96,7 @@ describe("airspace-poller fetch & fallback", () => {
   beforeEach(async () => {
     vi.resetModules();
     const mod = await import("../airspace-poller.js");
-    mod._resetAirspaceCache();
+    mod.__TEST_INTERNALS__.reset();
     vi.useFakeTimers();
   });
 

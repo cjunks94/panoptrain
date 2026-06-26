@@ -136,16 +136,18 @@ export function buildShapeIndex(routes: RoutesGeoJSON): Record<string, ShapeData
   return index;
 }
 
-/** Test helper — clear the snap/bestShape caches so each test starts
- *  from a known empty state. The index WeakMap doesn't need explicit
- *  clearing in tests because each test creates fresh routes objects
- *  (always cache misses). Production code shouldn't call this; LRU
- *  eviction handles cache growth and the WeakMap drops indexes when
- *  the routes object is GC'd. */
-export function _resetTrackCachesForTests(): void {
-  snapCache.clear();
-  bestShapeCache.clear();
-}
+/** Test-only — clear the snap/bestShape caches so each test starts from
+ *  a known empty state. The index WeakMap doesn't need explicit clearing
+ *  in tests because each test creates fresh routes objects (always cache
+ *  misses). Production code shouldn't call this; LRU eviction handles
+ *  cache growth and the WeakMap drops indexes when the routes object is
+ *  GC'd. */
+export const __TEST_INTERNALS__ = {
+  reset: () => {
+    snapCache.clear();
+    bestShapeCache.clear();
+  },
+};
 
 // scheduleIdle imported from ../scheduleIdle. We don't track or cancel
 // the handle here — the previous single-slot cancel-and-replace existed

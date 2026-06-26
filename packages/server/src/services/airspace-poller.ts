@@ -139,6 +139,4 @@ export function getCurrentAirspaceSnapshot(): AirspaceSnapshot | null {
 }
 
 /** Test-only — production code never calls this. */
-export function _resetAirspaceCache(): void {
-  poller.__TEST_INTERNALS__.reset();
-}
+export const __TEST_INTERNALS__ = poller.__TEST_INTERNALS__;

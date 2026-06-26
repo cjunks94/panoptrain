@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { RoutesGeoJSON } from "@panoptrain/shared";
 import {
-  _resetTrackCachesForTests,
+  __TEST_INTERNALS__,
   buildShapeIndex,
   findTrackPath,
   getTrackCacheSizes,
@@ -34,7 +34,7 @@ beforeEach(() => {
     fn();
     return 0;
   }) as unknown as typeof setTimeout);
-  _resetTrackCachesForTests();
+  __TEST_INTERNALS__.reset();
 });
 
 // Restore real timers so later tests in the same worker don't inherit
