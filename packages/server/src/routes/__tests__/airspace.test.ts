@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { AirspaceResponseSchema } from "@panoptrain/shared";
 import airspace from "../airspace.js";
 import {
-  _resetAirspaceCache,
+  __TEST_INTERNALS__,
   getCurrentAirspaceSnapshot,
 } from "../../services/airspace-poller.js";
 
@@ -17,7 +17,7 @@ async function get(path: string) {
 }
 
 beforeEach(() => {
-  _resetAirspaceCache();
+  __TEST_INTERNALS__.reset();
 });
 
 describe("GET /api/airspace/aircraft", () => {

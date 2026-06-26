@@ -84,8 +84,8 @@ describe("mta-poller resilience", () => {
       .mockResolvedValueOnce(okResponse(encodeFeed([{ tripId: "cached", routeId: "1" }])))
       .mockResolvedValue(failResponse());
 
-    const { resolveWithFallback, _resetCache } = await import("../mta-poller.js");
-    _resetCache();
+    const { resolveWithFallback, __TEST_INTERNALS__ } = await import("../mta-poller.js");
+    __TEST_INTERNALS__.reset();
 
     const first = await resolveWithFallback("subway", "gtfs", "https://example.test/feed", Date.now());
     expect(first).not.toBeNull();
@@ -100,8 +100,8 @@ describe("mta-poller resilience", () => {
 
   it("returns null when fetch fails AND no cached parse exists", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(failResponse());
-    const { resolveWithFallback, _resetCache } = await import("../mta-poller.js");
-    _resetCache();
+    const { resolveWithFallback, __TEST_INTERNALS__ } = await import("../mta-poller.js");
+    __TEST_INTERNALS__.reset();
 
     const result = await resolveWithFallback("subway", "gtfs-ace", "https://example.test/feed", Date.now());
     expect(result).toBeNull();
@@ -115,8 +115,8 @@ describe("mta-poller resilience", () => {
       .mockResolvedValueOnce(okResponse(encodeFeed([{ tripId: "lirr-train", routeId: "1" }])))
       .mockResolvedValue(failResponse());
 
-    const { resolveWithFallback, _resetCache } = await import("../mta-poller.js");
-    _resetCache();
+    const { resolveWithFallback, __TEST_INTERNALS__ } = await import("../mta-poller.js");
+    __TEST_INTERNALS__.reset();
 
     await resolveWithFallback("subway", "gtfs", "https://example.test/feed", Date.now());
     await resolveWithFallback("lirr", "gtfs-lirr", "https://example.test/feed", Date.now());

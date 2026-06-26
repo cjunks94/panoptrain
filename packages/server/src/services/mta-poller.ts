@@ -33,12 +33,11 @@ export function startPolling(mode: Mode, gtfs: StaticGtfsData, intervalMs: numbe
   intervals[mode] = setInterval(() => void pollFeeds(mode, gtfs), intervalMs);
 }
 
-/** Wipe the per-feed parse cache. Test-only — production code never calls
- *  this. Cache is otherwise reset only via TTL eviction inside
- *  resolveWithFallback. */
-export function _resetCache(): void {
-  feedCache.clear();
-}
+/** Test-only — production code never calls this. The cache is otherwise
+ *  reset only via TTL eviction inside `resolveWithFallback`. */
+export const __TEST_INTERNALS__ = {
+  reset: () => feedCache.clear(),
+};
 
 export function stopPolling(mode?: Mode): void {
   const stopOne = (m: Mode) => {
