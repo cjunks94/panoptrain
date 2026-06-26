@@ -1,5 +1,6 @@
 import type { TafPeriod, TafReport, TafsResponse } from "@panoptrain/shared";
 import { AIRPORTS } from "@panoptrain/shared";
+import { z } from "zod";
 import { consoleLogger } from "../lib/logger.js";
 import { createSnapshotPoller, fetchWithRetry, type SnapshotPoller } from "./base-poller.js";
 
@@ -27,28 +28,40 @@ const CACHE_TTL_MS = 8 * 60 * 60 * 1000;
 const ALL_ICAO = AIRPORTS.map((a) => a.icao);
 
 /** Raw record shape from aviationweather.gov's /api/data/taf endpoint
- *  with format=json. We declare only the fields we read. */
-interface AwxTafRecord {
-  icaoId?: string;
-  issueTime?: string;
-  validTimeFrom?: number;
-  validTimeTo?: number;
-  rawTAF?: string;
-  fcsts?: AwxTafForecast[];
-}
+ *  with format=json. We declare only the fields we read.
+ *  Zod-validated at the fetch boundary (#86) so a schema drift surfaces
+ *  as a structured log line + cache fallback. */
+const AwxTafCloudSchema = z.object({
+  cover: z.string().optional(),
+  base: z.number().nullable().optional(),
+});
 
-interface AwxTafForecast {
-  timeFrom?: number;
-  timeTo?: number;
-  fcstChange?: string | null;
-  probability?: number | null;
-  wdir?: number | string | null;
-  wspd?: number | null;
-  wgst?: number | null;
-  visib?: number | string | null;
-  wxString?: string | null;
-  clouds?: Array<{ cover?: string; base?: number | null }>;
-}
+const AwxTafForecastSchema = z.object({
+  timeFrom: z.number().optional(),
+  timeTo: z.number().optional(),
+  fcstChange: z.string().nullable().optional(),
+  probability: z.number().nullable().optional(),
+  wdir: z.union([z.number(), z.string()]).nullable().optional(),
+  wspd: z.number().nullable().optional(),
+  wgst: z.number().nullable().optional(),
+  visib: z.union([z.number(), z.string()]).nullable().optional(),
+  wxString: z.string().nullable().optional(),
+  clouds: z.array(AwxTafCloudSchema).optional(),
+});
+
+const AwxTafRecordSchema = z.object({
+  icaoId: z.string().optional(),
+  issueTime: z.string().optional(),
+  validTimeFrom: z.number().optional(),
+  validTimeTo: z.number().optional(),
+  rawTAF: z.string().optional(),
+  fcsts: z.array(AwxTafForecastSchema).optional(),
+});
+
+const AwxTafResponseSchema = z.array(AwxTafRecordSchema);
+
+type AwxTafRecord = z.infer<typeof AwxTafRecordSchema>;
+type AwxTafForecast = z.infer<typeof AwxTafForecastSchema>;
 
 function parseVisibility(visib: AwxTafForecast["visib"]): number | null {
   if (visib === undefined || visib === null) return null;
@@ -163,7 +176,7 @@ export async function fetchTafSnapshot(signal?: AbortSignal): Promise<TafsRespon
   const url = `${AVIATIONWEATHER_BASE}?ids=${ALL_ICAO.join(",")}&format=json`;
   const records = await fetchWithRetry<AwxTafRecord[]>({
     url,
-    parse: async (r) => (await r.json()) as AwxTafRecord[],
+    parse: async (r) => AwxTafResponseSchema.parse(await r.json()),
     headers: { "User-Agent": USER_AGENT, accept: "application/json" },
     timeoutMs: FETCH_TIMEOUT_MS,
     retryDelaysMs: RETRY_DELAYS_MS,

@@ -1,5 +1,6 @@
 import type { FlightCategory, MetarReport, MetarsResponse } from "@panoptrain/shared";
 import { AIRPORTS } from "@panoptrain/shared";
+import { z } from "zod";
 import { consoleLogger } from "../lib/logger.js";
 import { createSnapshotPoller, fetchWithRetry, type SnapshotPoller } from "./base-poller.js";
 
@@ -25,27 +26,38 @@ const CACHE_TTL_MS = 2 * 60 * 60 * 1000;
 const ALL_ICAO = AIRPORTS.map((a) => a.icao);
 
 /** Raw record shape from aviationweather.gov's /api/data/metar endpoint
- *  with format=json. We declare only the fields we read. */
-interface AwxMetarRecord {
-  icaoId?: string;
-  obsTime?: number;
-  rawOb?: string;
-  fltCat?: string;
+ *  with format=json. We declare only the fields we read.
+ *  Zod-validated at the fetch boundary (#86) so a schema drift surfaces
+ *  as a structured log line + cache fallback. */
+const AwxMetarCloudSchema = z.object({
+  cover: z.string().optional(),
+  base: z.number().optional(),
+});
+
+const AwxMetarRecordSchema = z.object({
+  icaoId: z.string().optional(),
+  obsTime: z.number().optional(),
+  rawOb: z.string().optional(),
+  fltCat: z.string().optional(),
   /** Wind direction, true degrees 0-360. Some records ship "VRB" as a
    *  string for variable wind; we treat that as null. */
-  wdir?: number | string;
-  wspd?: number;
-  wgst?: number;
+  wdir: z.union([z.number(), z.string()]).optional(),
+  wspd: z.number().optional(),
+  wgst: z.number().optional(),
   /** Statute miles. Sometimes a literal string like "10+" or "1/2"
    *  for unlimited / fractional values. */
-  visib?: number | string;
-  temp?: number;
-  dewp?: number;
+  visib: z.union([z.number(), z.string()]).optional(),
+  temp: z.number().optional(),
+  dewp: z.number().optional(),
   /** hPa (millibars). We convert to inHg at the boundary because that's
    *  the US flight-ops convention. */
-  altim?: number;
-  clouds?: Array<{ cover?: string; base?: number }>;
-}
+  altim: z.number().optional(),
+  clouds: z.array(AwxMetarCloudSchema).optional(),
+});
+
+const AwxMetarResponseSchema = z.array(AwxMetarRecordSchema);
+
+type AwxMetarRecord = z.infer<typeof AwxMetarRecordSchema>;
 
 const HPA_TO_INHG = 0.02953;
 
@@ -139,7 +151,7 @@ export async function fetchMetarSnapshot(signal?: AbortSignal): Promise<MetarsRe
   const url = `${AVIATIONWEATHER_BASE}?ids=${ALL_ICAO.join(",")}&format=json`;
   const records = await fetchWithRetry<AwxMetarRecord[]>({
     url,
-    parse: async (r) => (await r.json()) as AwxMetarRecord[],
+    parse: async (r) => AwxMetarResponseSchema.parse(await r.json()),
     headers: { "User-Agent": USER_AGENT, accept: "application/json" },
     timeoutMs: FETCH_TIMEOUT_MS,
     retryDelaysMs: RETRY_DELAYS_MS,

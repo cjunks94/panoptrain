@@ -1,4 +1,5 @@
 import type { Aircraft } from "@panoptrain/shared";
+import { z } from "zod";
 import { consoleLogger } from "../lib/logger.js";
 import { createSnapshotPoller, fetchWithRetry, type SnapshotPoller } from "./base-poller.js";
 
@@ -32,26 +33,31 @@ export interface AirspaceSnapshot {
   source: "live" | "cached";
 }
 
-/** adsb.lol /v2 response shape — we declare only the fields we read. */
-interface AdsbLolResponse {
-  ac?: AdsbLolAircraft[] | null;
-  /** Upstream's epoch ms at request time. */
-  now?: number;
-}
-
-interface AdsbLolAircraft {
-  hex?: string;
-  flight?: string;
-  lat?: number;
-  lon?: number;
-  alt_baro?: number | string;
-  gs?: number;
-  track?: number;
-  category?: string;
-  squawk?: string;
+/** adsb.lol /v2 response shape — we declare only the fields we read.
+ *  Zod-validated at the fetch boundary (#86) so an upstream schema drift
+ *  surfaces as a structured log line + cache fallback instead of silently
+ *  propagating bad data to clients. */
+const AdsbLolAircraftSchema = z.object({
+  hex: z.string().optional(),
+  flight: z.string().optional(),
+  lat: z.number().optional(),
+  lon: z.number().optional(),
+  alt_baro: z.union([z.number(), z.string()]).optional(),
+  gs: z.number().optional(),
+  track: z.number().optional(),
+  category: z.string().optional(),
+  squawk: z.string().optional(),
   /** Seconds since this aircraft was last received upstream. */
-  seen?: number;
-}
+  seen: z.number().optional(),
+});
+
+const AdsbLolResponseSchema = z.object({
+  ac: z.array(AdsbLolAircraftSchema).nullable().optional(),
+  /** Upstream's epoch ms at request time. */
+  now: z.number().optional(),
+});
+
+type AdsbLolResponse = z.infer<typeof AdsbLolResponseSchema>;
 
 /**
  * Translate the adsb.lol record format to our narrow Aircraft type.
@@ -99,7 +105,7 @@ export async function fetchAircraftSnapshot(signal?: AbortSignal): Promise<Airsp
   const url = `${ADSB_LOL_BASE}/lat/${NYC_LAT}/lon/${NYC_LON}/dist/${NYC_RADIUS_NM}`;
   const payload = await fetchWithRetry<AdsbLolResponse>({
     url,
-    parse: async (r) => (await r.json()) as AdsbLolResponse,
+    parse: async (r) => AdsbLolResponseSchema.parse(await r.json()),
     headers: { "User-Agent": USER_AGENT, accept: "application/json" },
     timeoutMs: FETCH_TIMEOUT_MS,
     retryDelaysMs: RETRY_DELAYS_MS,
