@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { parsePositiveInt } from "../lib/config.js";
 import { getCurrentSnapshot, getPreviousSnapshot } from "../services/cache.js";
 import type { Mode, TrainPosition, TrainsResponse } from "@panoptrain/shared";
 
@@ -20,11 +21,9 @@ export function createTrainsRouter(mode: Mode): Hono {
 
     // Evict trains not updated in the last 5 minutes — likely stale feed
     // artifacts. Overridable via TRAINS_TTL_S so e2e tests using frozen
-    // GTFS-RT fixture timestamps don't see an empty response. Validate
-    // the env value: a typo or negative number would silently filter
-    // every train and produce a confusing empty response.
-    const parsedTtl = Number(process.env.TRAINS_TTL_S);
-    const TTL = Number.isFinite(parsedTtl) && parsedTtl > 0 ? parsedTtl : 300; // seconds
+    // GTFS-RT fixture timestamps don't see an empty response. Read inside
+    // the handler so e2e tests can mutate the env var across runs.
+    const TTL = parsePositiveInt("TRAINS_TTL_S", 300); // seconds
     const now = Math.floor(Date.now() / 1000);
     const routeFilter = c.req.query("routes");
     const routeSet = routeFilter
