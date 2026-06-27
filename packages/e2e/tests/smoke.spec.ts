@@ -9,12 +9,14 @@ test.describe("Panoptrain — happy path", () => {
   test("fetches and displays live train data", async ({ page }) => {
     await page.goto("/");
 
-    // Status badge should show Live with a non-zero train count after first poll
+    // 15s timeout (was 5s) — globalSetup guarantees the server has trains
+    // before this runs, but mobile-viewport CPU throttle can still slow
+    // the client's first render past the original 5s window (#111).
     const status = page.locator("text=/Live/");
-    await expect(status).toBeVisible({ timeout: 5_000 });
+    await expect(status).toBeVisible({ timeout: 15_000 });
 
     const count = page.locator("text=/\\d+ trains/");
-    await expect(count).toBeVisible({ timeout: 5_000 });
+    await expect(count).toBeVisible({ timeout: 15_000 });
     const countText = await count.textContent();
     const num = parseInt(countText!.match(/(\d+)/)![1], 10);
     expect(num).toBeGreaterThan(0);
@@ -24,8 +26,8 @@ test.describe("Panoptrain — happy path", () => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Panoptrain" })).toBeVisible();
 
-    // Wait for trains to load
-    await expect(page.locator("text=/\\d+ trains/")).toBeVisible({ timeout: 5_000 });
+    // 15s timeout (#111) — see "fetches and displays live train data" above.
+    await expect(page.locator("text=/\\d+ trains/")).toBeVisible({ timeout: 15_000 });
 
     await page.getByRole("button", { name: "All Off" }).click();
     await page.getByRole("button", { name: "All On" }).click();

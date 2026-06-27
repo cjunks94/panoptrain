@@ -2,6 +2,11 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests",
+  // Wait for the server's first poll cycle to complete before any test
+  // runs — webServer URL check only verifies `/api/health` 200, which
+  // returns the instant the server binds. Mobile viewports + CPU throttle
+  // raced this window and saw `count = 0` (#111).
+  globalSetup: "./globalSetup.ts",
   // Tests are deterministic now (server data is mocked via MSW), so we
   // can safely run files in parallel. `fullyParallel: true` also runs
   // tests *within* a file in parallel, which is fine — none of these
