@@ -11,11 +11,14 @@ test.describe("Panoptrain — happy path", () => {
 
     // 15s timeout (was 5s) — globalSetup guarantees the server has trains
     // before this runs, but mobile-viewport CPU throttle can still slow
-    // the client's first render past the original 5s window (#111).
+    // the client's first render past the original 5s window (#111). The
+    // regex requires a leading non-zero digit so the locator actually
+    // waits for data to land instead of matching the initial-state
+    // "0 trains" placeholder.
     const status = page.locator("text=/Live/");
     await expect(status).toBeVisible({ timeout: 15_000 });
 
-    const count = page.locator("text=/\\d+ trains/");
+    const count = page.locator("text=/[1-9]\\d* trains/");
     await expect(count).toBeVisible({ timeout: 15_000 });
     const countText = await count.textContent();
     const num = parseInt(countText!.match(/(\d+)/)![1], 10);
@@ -27,7 +30,7 @@ test.describe("Panoptrain — happy path", () => {
     await expect(page.getByRole("heading", { name: "Panoptrain" })).toBeVisible();
 
     // 15s timeout (#111) — see "fetches and displays live train data" above.
-    await expect(page.locator("text=/\\d+ trains/")).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator("text=/[1-9]\\d* trains/")).toBeVisible({ timeout: 15_000 });
 
     await page.getByRole("button", { name: "All Off" }).click();
     await page.getByRole("button", { name: "All On" }).click();
