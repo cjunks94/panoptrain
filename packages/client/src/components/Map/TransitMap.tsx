@@ -686,6 +686,10 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
           setPopupTripId(null);
           setPopupAirportIata(null);
           setPopupStopId(null);
+          // Cancel any active train follow — the RAF loop would otherwise
+          // recenter on the followed train and pull the camera off the
+          // aircraft the user just clicked. Mirrors the airport branch.
+          setFollowTripId(null);
         }
         return;
       }
@@ -714,6 +718,8 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
           setPopupTripId(null);
           setPopupAircraftHex(null);
           setPopupAirportIata(null);
+          // Cancel any active train follow — see aircraft branch above.
+          setFollowTripId(null);
         }
         return;
       }
