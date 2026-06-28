@@ -23,6 +23,7 @@ import { TrainPopup } from "./TrainPopup.js";
 import { MapLoadingBadge } from "./MapLoadingBadge.js";
 import { AircraftPopup } from "./AircraftPopup.js";
 import { AirportPopup } from "./AirportPopup.js";
+import { StopPopup } from "./StopPopup.js";
 import type { GeoJSON } from "geojson";
 
 const BASEMAP = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
@@ -245,6 +246,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
   const [iconsReady, setIconsReady] = useState(false);
   const [followTripId, setFollowTripId] = useState<string | null>(null);
   const [popupAircraftHex, setPopupAircraftHex] = useState<string | null>(null);
+  const [popupStopId, setPopupStopId] = useState<string | null>(null);
   // Airport popup state is owned by App so the panel directory can open
   // the same popup. Use a local alias so the replace-everywhere below
   // keeps reading naturally.
@@ -670,11 +672,12 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
         setPopupTripId(null);
         setPopupAircraftHex(null);
         setPopupAirportIata(null);
+        setPopupStopId(null);
         return;
       }
-      // Layer dispatch — aircraft markers, train markers, and airport
-      // dots all flow through the same click event but live in different
-      // layers and key off different properties.
+      // Layer dispatch — aircraft markers, train markers, airport dots,
+      // and station dots all flow through the same click event but live
+      // in different layers and key off different properties.
       const layerId = feature.layer?.id;
       if (layerId === "aircraft-markers") {
         const hex = feature.properties.hex as string | undefined;
@@ -682,6 +685,11 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
           setPopupAircraftHex(hex);
           setPopupTripId(null);
           setPopupAirportIata(null);
+          setPopupStopId(null);
+          // Cancel any active train follow — the RAF loop would otherwise
+          // recenter on the followed train and pull the camera off the
+          // aircraft the user just clicked. Mirrors the airport branch.
+          setFollowTripId(null);
         }
         return;
       }
@@ -695,9 +703,22 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
           setPopupAirportIata(iata);
           setPopupAircraftHex(null);
           setPopupTripId(null);
+          setPopupStopId(null);
           // Clear any active train follow — the RAF loop would otherwise
           // keep recentering on the followed train and yank the camera
           // away from the airport the user just clicked.
+          setFollowTripId(null);
+        }
+        return;
+      }
+      if (layerId === "station-dots") {
+        const stopId = feature.properties.stopId as string | undefined;
+        if (stopId) {
+          setPopupStopId(stopId);
+          setPopupTripId(null);
+          setPopupAircraftHex(null);
+          setPopupAirportIata(null);
+          // Cancel any active train follow — see aircraft branch above.
           setFollowTripId(null);
         }
         return;
@@ -714,6 +735,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
         setPopupTripId(tripId);
         setPopupAircraftHex(null);
         setPopupAirportIata(null);
+        setPopupStopId(null);
       }
     },
     [trains],
@@ -742,6 +764,16 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     [popupAirportIata],
   );
 
+  // Station popup lookup. Stops are per-mode and arrive via prop; the
+  // feature list is ~500 stops max so a linear find per render is cheap.
+  const popupStop = useMemo(
+    () =>
+      popupStopId && stops
+        ? stops.features.find((f) => f.properties.stopId === popupStopId) ?? null
+        : null,
+    [popupStopId, stops],
+  );
+
   // If the popup's train falls out of the snapshot (TTL eviction, mode flip,
   // route filter), close the popup so it doesn't keep tracking a ghost.
   useEffect(() => {
@@ -753,6 +785,12 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
   useEffect(() => {
     if (popupAircraftHex && !popupAircraft) setPopupAircraftHex(null);
   }, [popupAircraftHex, popupAircraft]);
+
+  // Same for stops: if the mode changes and the stop isn't in the new
+  // dataset, close the popup so it doesn't strand at an orphan coordinate.
+  useEffect(() => {
+    if (popupStopId && !popupStop) setPopupStopId(null);
+  }, [popupStopId, popupStop]);
 
   // Pan to an airport when the user picks it from the panel directory.
   // Map-clicks on airport dots leave flyToToken null so the camera
@@ -816,7 +854,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
       initialViewState={NYC_CENTER}
       style={{ width: "100%", height: "100%" }}
       mapStyle={BASEMAP}
-      interactiveLayerIds={["train-markers", "aircraft-markers", ...AIRPORT_LAYER_IDS]}
+      interactiveLayerIds={["train-markers", "aircraft-markers", "station-dots", ...AIRPORT_LAYER_IDS]}
       onClick={handleClick}
       onLoad={handleMapLoad}
       cursor="pointer"
@@ -1381,6 +1419,14 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
           metar={metarReports[popupAirport.icao] ?? null}
           taf={tafReports[popupAirport.icao] ?? null}
           onClose={() => setPopupAirportIata(null)}
+        />
+      )}
+
+      {/* Station popup — name + stop ID + serving-route chips. */}
+      {popupStop && (
+        <StopPopup
+          stop={popupStop}
+          onClose={() => setPopupStopId(null)}
         />
       )}
 
