@@ -24,13 +24,13 @@
     "csv-parse": "^7.0.0",
     "dotenv": "^17.4.2",
     "gtfs-realtime-bindings": "^2.0.0",
-    "hono": "^4.12.26",
+    "hono": "^4.12.27",
     "jszip": "^3.10.0",
-    "protobufjs": "^8.6.4",
+    "protobufjs": "^8.6.5",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^26.0.0",
+    "@types/node": "^26.0.1",
     "msw": "^2.14.6",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",

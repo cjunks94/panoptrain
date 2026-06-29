@@ -10,8 +10,8 @@
     "profile:flakes": "tsx scripts/profile-flakes.ts"
   },
   "devDependencies": {
-    "@playwright/test": "^1.61.0",
-    "@types/node": "^26.0.0",
+    "@playwright/test": "^1.61.1",
+    "@types/node": "^26.0.1",
     "tsx": "^4.22.4"
   }
 }
