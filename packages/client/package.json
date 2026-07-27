@@ -16,8 +16,8 @@
     "@turf/line-slice": "^7.3.5",
     "@turf/nearest-point-on-line": "^7.3.5",
     "maplibre-gl": "^4.7.0",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "react-map-gl": "^8.1.1",
     "zod": "^4.4.3"
   },
@@ -28,6 +28,6 @@
     "@vitejs/plugin-react": "^4.3.0",
     "typescript": "^6.0.3",
     "vite": "^6.0.0",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.10"
   }
 }
