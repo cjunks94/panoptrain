@@ -14,26 +14,26 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@hono/node-server": "^2.0.6",
+    "@hono/node-server": "^2.0.12",
     "@panoptrain/shared": "workspace:*",
     "@turf/along": "^7.3.5",
     "@turf/bearing": "^7.3.5",
     "@turf/helpers": "^7.3.5",
     "@turf/length": "^7.3.5",
     "@turf/nearest-point-on-line": "^7.3.5",
-    "csv-parse": "^7.0.0",
+    "csv-parse": "^7.0.1",
     "dotenv": "^17.4.2",
-    "gtfs-realtime-bindings": "^2.0.0",
-    "hono": "^4.12.26",
+    "gtfs-realtime-bindings": "^2.2.0",
+    "hono": "^4.12.33",
     "jszip": "^3.10.0",
-    "protobufjs": "^8.6.4",
+    "protobufjs": "^8.7.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^26.0.0",
-    "msw": "^2.14.6",
-    "tsx": "^4.22.4",
+    "@types/node": "^26.1.2",
+    "msw": "^2.15.0",
+    "tsx": "^4.23.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.10"
   }
 }
