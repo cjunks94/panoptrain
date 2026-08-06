@@ -1,6 +1,7 @@
 import type { TripPlan, RideSegment, TransferSegment, TrainPosition } from "@panoptrain/shared";
 import type { StaticGtfsData } from "./gtfs-loader.js";
 import { getCurrentSnapshot } from "./cache.js";
+import { MinHeap } from "../lib/min-heap.js";
 
 const AVG_SPEED_KMH = 30;
 const DWELL_MIN_PER_STOP = 0.5;
@@ -158,8 +159,11 @@ export function planTrip(
   const fromStop = gtfs.stops[fromIds[0]];
   const toStop = gtfs.stops[toIds[0]];
 
-  const sources: string[] = [];
-  for (const id of fromIds) sources.push(...resolvePlatforms(graph, id, gtfs));
+  // Dedupe: distinct parent IDs can resolve to overlapping platform sets, and
+  // a caller may repeat an ID outright. Seeding the frontier with duplicates
+  // adds no reachability — every copy relaxes to the same state at cost 0 —
+  // but multiplies the work done per search (#127).
+  const sources = [...new Set(fromIds.flatMap((id) => resolvePlatforms(graph, id, gtfs)))];
   const targetSet = new Set<string>();
   for (const id of toIds) for (const p of resolvePlatforms(graph, id, gtfs)) targetSet.add(p);
   if (sources.length === 0 || targetSet.size === 0) return null;
@@ -172,20 +176,30 @@ export function planTrip(
   // Dijkstra over states: stateKey → cost; steps map for reconstruction
   const dist = new Map<string, number>();
   const steps = new Map<string, PathStep>();
-  const queue: { stopId: string; route: string | null; cost: number }[] = [];
+  // Min-heap frontier. The `seq` tie-break reproduces the previous
+  // sort-then-shift behaviour exactly: V8's sort is stable, so among
+  // equal-cost entries the earliest-inserted was dequeued first. Without it,
+  // heap ordering would silently change which of several equal-cost plans is
+  // returned.
+  interface QueueItem {
+    stopId: string;
+    route: string | null;
+    cost: number;
+    seq: number;
+  }
+  const queue = new MinHeap<QueueItem>((a, b) => a.cost - b.cost || a.seq - b.seq);
 
   for (const s of sources) {
     const k = stateKey(s, null);
     dist.set(k, 0);
     steps.set(k, { stopId: s, edge: null, prevState: null });
-    queue.push({ stopId: s, route: null, cost: 0 });
+    queue.push({ stopId: s, route: null, cost: 0, seq: queue.nextSeq() });
   }
 
   let foundState: string | null = null;
 
-  while (queue.length > 0) {
-    queue.sort((a, b) => a.cost - b.cost);
-    const { stopId, route, cost } = queue.shift()!;
+  while (queue.size > 0) {
+    const { stopId, route, cost } = queue.pop()!;
     const key = stateKey(stopId, route);
     if (cost > (dist.get(key) ?? Infinity)) continue;
 
@@ -213,7 +227,7 @@ export function planTrip(
       if (nextCost < (dist.get(nextKey) ?? Infinity)) {
         dist.set(nextKey, nextCost);
         steps.set(nextKey, { stopId: edge.to, edge, prevState: key });
-        queue.push({ stopId: edge.to, route: nextRoute, cost: nextCost });
+        queue.push({ stopId: edge.to, route: nextRoute, cost: nextCost, seq: queue.nextSeq() });
       }
     }
   }

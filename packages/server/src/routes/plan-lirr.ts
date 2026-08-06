@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { LirrPlanResponse } from "@panoptrain/shared";
 import { loadStaticGtfs, loadLirrSchedule } from "../services/gtfs-loader.js";
 import { planLirrTrips, DIRECT_LOOKAHEAD_HOURS } from "../services/lirr-trip-planner.js";
+import { parseStationIds } from "../lib/station-ids.js";
 
 const planLirr = new Hono();
 
@@ -20,11 +21,16 @@ planLirr.get("/", (c) => {
     return c.json({ error: "Missing 'from' or 'to' query parameter" }, 400);
   }
 
-  const fromIds = from.split(",").map((s) => s.trim()).filter(Boolean);
-  const toIds = to.split(",").map((s) => s.trim()).filter(Boolean);
-  if (fromIds.length === 0 || toIds.length === 0) {
-    return c.json({ error: "Empty 'from' or 'to' query parameter" }, 400);
-  }
+  // Deduped and bounded before any planning work. The LIRR planner is
+  // schedule-based and was measured as unaffected by the unbounded-id problem
+  // that hit /api/plan, but it takes the same input shape and there is no
+  // reason to leave the ceiling off one of the two (#127).
+  const fromParsed = parseStationIds(from, "from");
+  if (!fromParsed.ok) return c.json({ error: fromParsed.error }, 400);
+  const toParsed = parseStationIds(to, "to");
+  if (!toParsed.ok) return c.json({ error: toParsed.error }, 400);
+  const { ids: fromIds } = fromParsed;
+  const { ids: toIds } = toParsed;
 
   // `at` accepts an ISO datetime; default to "now" when absent. Require an
   // explicit timezone offset (Z or ±HH:MM) — Date.parse interprets offset-less

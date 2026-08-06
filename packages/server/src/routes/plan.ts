@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { PlanResponse } from "@panoptrain/shared";
 import { loadStaticGtfs } from "../services/gtfs-loader.js";
 import { buildStationGraph, planTrips, type StationGraph } from "../services/trip-planner.js";
+import { parseStationIds } from "../lib/station-ids.js";
 
 // Trip planner is subway-only for now (PT-508) — LIRR is schedule-based and
 // needs its own graph + planner.
@@ -25,17 +26,19 @@ plan.get("/", (c) => {
   }
 
   // `from` / `to` may be a single stop ID or comma-separated list of parent
-  // IDs (broad station selection across same-name parents).
-  const fromIds = from.split(",").map((s) => s.trim()).filter(Boolean);
-  const toIds = to.split(",").map((s) => s.trim()).filter(Boolean);
-  if (fromIds.length === 0 || toIds.length === 0) {
-    return c.json({ error: "Empty 'from' or 'to' query parameter" }, 400);
-  }
+  // IDs (broad station selection across same-name parents). Deduped and
+  // bounded before any planning work happens — see parseStationIds (#127).
+  const fromParsed = parseStationIds(from, "from");
+  if (!fromParsed.ok) return c.json({ error: fromParsed.error }, 400);
+  const toParsed = parseStationIds(to, "to");
+  if (!toParsed.ok) return c.json({ error: toParsed.error }, 400);
+  const { ids: fromIds } = fromParsed;
+  const { ids: toIds } = toParsed;
 
   const gtfs = loadStaticGtfs("subway");
   for (const id of [...fromIds, ...toIds]) {
-    if (!gtfs.stops[id]) {
-      return c.json({ error: `Unknown stop ID: ${id}` }, 400);
+    if (!Object.prototype.hasOwnProperty.call(gtfs.stops, id)) {
+      return c.json({ error: "Unknown stop ID" }, 400);
     }
   }
 
