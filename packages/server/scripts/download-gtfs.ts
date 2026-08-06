@@ -93,11 +93,48 @@ interface RawCalendarDate {
   exception_type: string; // "1" = added, "2" = removed
 }
 
+/** Wall-clock budget for the archive download. Without this a hung TCP
+ *  connection stalls the Docker build indefinitely — and because the failure
+ *  never surfaces, the retry loop in the Dockerfile never fires either. */
+const DOWNLOAD_TIMEOUT_MS = 60_000;
+
+/** Ceiling on the compressed archive. Subway is ~5 MB and LIRR ~4 MB as of
+ *  2026-07; 100 MB leaves generous headroom for schedule growth while still
+ *  bounding memory if the endpoint misbehaves or is substituted. */
+const MAX_ARCHIVE_BYTES = 100 * 1024 * 1024;
+
+/** The archive is unauthenticated and unsigned, so TLS is the only thing
+ *  standing between the build and an on-path attacker — the extracted data is
+ *  baked into the image and served to every client. Assert the scheme rather
+ *  than trusting the constant to stay correct through future edits. */
+function assertHttps(url: string): void {
+  if (!url.startsWith("https://")) {
+    throw new Error(`Refusing to download GTFS over a non-HTTPS URL: ${url}`);
+  }
+}
+
 async function main() {
   console.log(`Downloading ${MODE} GTFS static data from ${SOURCE_URL}...`);
-  const res = await fetch(SOURCE_URL);
+  assertHttps(SOURCE_URL);
+
+  const res = await fetch(SOURCE_URL, {
+    signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+    redirect: "error", // a redirect could downgrade to http; fail instead
+  });
   if (!res.ok) throw new Error(`Failed to download: ${res.status}`);
+
+  // Check the advertised length before buffering, then re-check the actual
+  // bytes — Content-Length is a hint, not a guarantee.
+  const declared = Number(res.headers.get("content-length") ?? 0);
+  if (declared > MAX_ARCHIVE_BYTES) {
+    throw new Error(`GTFS archive too large: ${declared} bytes (max ${MAX_ARCHIVE_BYTES})`);
+  }
+
   const buf = await res.arrayBuffer();
+  if (buf.byteLength > MAX_ARCHIVE_BYTES) {
+    throw new Error(`GTFS archive too large: ${buf.byteLength} bytes (max ${MAX_ARCHIVE_BYTES})`);
+  }
+  console.log(`Downloaded ${(buf.byteLength / 1024 / 1024).toFixed(1)} MB`);
 
   console.log("Extracting zip...");
   const zip = await JSZip.loadAsync(buf);
