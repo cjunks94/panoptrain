@@ -33,6 +33,21 @@ updates:
       prefix: "chore(deps)"
       include: "scope"
 
+  # Tracks the digest-pinned FROM in the Dockerfile. Without this the base
+  # image is never updated at all — a tag pin drifts silently and a digest pin
+  # freezes forever, so either way it needs an explicit updater.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(infra)"
+      include: "scope"
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
