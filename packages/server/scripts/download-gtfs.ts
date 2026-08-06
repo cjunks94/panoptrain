@@ -23,6 +23,7 @@ import { writeFileSync, mkdirSync } from "node:fs";
 import { parse } from "csv-parse/sync";
 import JSZip from "jszip";
 import { staticGtfsUrlForMode } from "@panoptrain/shared";
+import { readBodyCapped } from "../src/lib/capped-body.js";
 import type { Mode } from "@panoptrain/shared";
 import nearestPointOnLine from "@turf/nearest-point-on-line";
 import { lineString, point } from "@turf/helpers";
@@ -130,10 +131,10 @@ async function main() {
     throw new Error(`GTFS archive too large: ${declared} bytes (max ${MAX_ARCHIVE_BYTES})`);
   }
 
-  const buf = await res.arrayBuffer();
-  if (buf.byteLength > MAX_ARCHIVE_BYTES) {
-    throw new Error(`GTFS archive too large: ${buf.byteLength} bytes (max ${MAX_ARCHIVE_BYTES})`);
-  }
+  // Enforce the ceiling *during* the read, not after — see readBodyCapped.
+  // The Content-Length check above is an early-out for an honest server; this
+  // is what actually bounds memory when the header is absent or wrong.
+  const buf = await readBodyCapped(res, MAX_ARCHIVE_BYTES);
   console.log(`Downloaded ${(buf.byteLength / 1024 / 1024).toFixed(1)} MB`);
 
   console.log("Extracting zip...");
