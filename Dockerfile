@@ -48,4 +48,19 @@ ENV PORT=3001
 ENV POLL_INTERVAL_MS=30000
 
 EXPOSE 3001
-CMD ["pnpm", "--filter", "@panoptrain/server", "start"]
+
+# Exec tsx directly rather than going through `pnpm run` (#129).
+#
+# pnpm as PID 1 does NOT forward SIGTERM to the script it spawned — it kills
+# the child and exits 1 with `Command failed with signal "SIGTERM"`. That
+# means the graceful-shutdown handler registered in src/index.ts never runs at
+# all, and every Railway redeploy severs in-flight responses. Verified in a
+# real container:
+#
+#   pnpm --filter ... start   -> exit 1, 446ms, no shutdown log lines
+#   tsx src/index.ts (PID 1)  -> exit 0, 488ms, "shutdown starting"/"complete"
+#
+# The .bin/tsx shim ends in `exec node ...`, so node genuinely becomes PID 1
+# and receives the signal directly. Absolute paths keep WORKDIR at /app so
+# nothing else shifts; all data paths resolve from import.meta.url anyway.
+CMD ["/app/packages/server/node_modules/.bin/tsx", "/app/packages/server/src/index.ts"]
