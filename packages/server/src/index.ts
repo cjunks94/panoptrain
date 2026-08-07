@@ -7,10 +7,11 @@ import { join, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parsePositiveInt } from "./lib/config.js";
 import { loadStaticGtfs } from "./services/gtfs-loader.js";
-import { startPolling } from "./services/mta-poller.js";
-import { startAirspacePolling } from "./services/airspace-poller.js";
-import { startMetarPolling } from "./services/metar-poller.js";
-import { startTafPolling } from "./services/taf-poller.js";
+import { startPolling, stopPolling } from "./services/mta-poller.js";
+import { startAirspacePolling, stopAirspacePolling } from "./services/airspace-poller.js";
+import { startMetarPolling, stopMetarPolling } from "./services/metar-poller.js";
+import { startTafPolling, stopTafPolling } from "./services/taf-poller.js";
+import { createShutdownHandler, connectionClosers, SHUTDOWN_GRACE_MS } from "./lib/shutdown.js";
 import { prewarmInterpolator } from "./services/position-interpolator.js";
 import { createTrainsRouter } from "./routes/trains.js";
 import { createStaticRouter } from "./routes/static.js";
@@ -140,5 +141,25 @@ if (AIRSPACE_ENABLED) {
 }
 
 console.log(`Panoptrain server starting on port ${PORT}...`);
-serve({ fetch: app.fetch, port: PORT });
+const server = serve({ fetch: app.fetch, port: PORT });
 console.log(`Server running at http://localhost:${PORT}`);
+
+// Railway sends SIGTERM before SIGKILL on redeploy. Without this the process
+// dies immediately, truncating in-flight (gzipped) responses and dropping
+// upstream fetches mid-flight. See lib/shutdown.ts (#129).
+const shutdown = createShutdownHandler({
+  closeServer: (done) => server.close(() => done()),
+  // Without these, close() waits on idle browser keep-alive sockets and
+  // shutdown always runs out the clock — even with no traffic.
+  ...connectionClosers(server),
+  stopPollers: () => {
+    stopPolling(); // all modes
+    stopAirspacePolling();
+    stopMetarPolling();
+    stopTafPolling();
+  },
+  graceMs: SHUTDOWN_GRACE_MS,
+});
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
