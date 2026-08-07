@@ -125,7 +125,7 @@ try {
   const lirrGtfs = loadStaticGtfs("lirr");
   prewarmInterpolator(lirrGtfs);
   startPolling("lirr", lirrGtfs, POLL_INTERVAL);
-} catch (err) {
+} catch {
   console.warn("LIRR GTFS data not available — skipping. Run \"pnpm download-gtfs lirr\" to enable LIRR.");
 }
 

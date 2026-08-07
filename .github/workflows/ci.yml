@@ -13,7 +13,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        task: [typecheck, test]
+        # lint and build restored (#144). `test` runs coverage so the
+        # thresholds in each package's vitest config are enforced in the
+        # same pass rather than duplicating a full test run.
+        task: [typecheck, lint, build, test:coverage]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -29,7 +32,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Cache GTFS static data
-        if: matrix.task == 'test'
+        if: matrix.task == 'test:coverage'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -43,7 +46,7 @@ jobs:
           key: gtfs-static-v4-subway-lirr-transfers
 
       - name: Download GTFS data if not cached
-        if: matrix.task == 'test'
+        if: matrix.task == 'test:coverage'
         run: |
           if [ ! -f packages/server/src/data/gtfs/stops.json ]; then
             pnpm download-gtfs

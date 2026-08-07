@@ -228,9 +228,13 @@ function estimateVehicle(
   // actually contains `now`. The vehicle's stop acts as a lower bound — we
   // never walk backwards. See ADR 002.
   let effectiveStopId = vehicle.currentStopId;
-  let effectivePrevStopId: string | null = null;
+  // No initializers: every branch below assigns both, so an initial null was
+  // a dead store. Declaring them unassigned makes TypeScript's definite-
+  // assignment analysis enforce that invariant rather than silently masking a
+  // future branch that forgets one.
+  let effectivePrevStopId: string | null;
   let effectiveStatus: ParsedVehicle["currentStatus"] = vehicle.currentStatus;
-  let nextStopId: string | null = null;
+  let nextStopId: string | null;
 
   if (tripUpdate) {
     const startIdx = tripUpdate.stopTimeUpdates.findIndex(
