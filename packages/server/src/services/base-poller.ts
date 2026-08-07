@@ -54,18 +54,63 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
       reject(abortReason(signal));
       return;
     }
-    const timer = setTimeout(resolve, ms);
-    if (signal) {
-      signal.addEventListener(
-        "abort",
-        () => {
-          clearTimeout(timer);
-          reject(abortReason(signal));
-        },
-        { once: true },
-      );
-    }
+    // `{ once: true }` removes the listener only when it FIRES. On the normal
+    // path — timer resolves, no abort — the listener would stay attached to
+    // the caller's signal forever. Poller signals are long-lived, so during an
+    // upstream outage that accumulates a listener per retry indefinitely and
+    // triggers MaxListenersExceededWarning storms (#141). Detach explicitly.
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      reject(abortReason(signal!));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
+}
+
+/**
+ * Builds a per-attempt abort signal combining a timeout with an optional
+ * long-lived caller signal — deliberately NOT via `AbortSignal.any` (#128).
+ *
+ * `AbortSignal.any([longLived, timeout])` registers the composite in the
+ * source signal's internal dependant set, and Node never prunes it. The
+ * entries survive the timeout firing *and* the source aborting — measured at
+ * ~2.2KB each on Node 24, retained for the life of the process. With one
+ * process-lifetime controller per poller that is ~45MB/day, which OOMs a
+ * 512MB container in one to two weeks.
+ *
+ * Owning the controller lets us detach the listener when the attempt ends,
+ * so nothing accumulates on the caller's signal.
+ */
+function attemptSignal(
+  timeoutMs: number,
+  signal?: AbortSignal,
+): { signal: AbortSignal; dispose: () => void } {
+  const controller = new AbortController();
+
+  // Match AbortSignal.timeout's rejection shape so callers and tests that
+  // check for a timeout see the same DOMException name they did before.
+  const timer = setTimeout(() => {
+    controller.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+  }, timeoutMs);
+
+  const onAbort = (): void => controller.abort(abortReason(signal!));
+  if (signal) {
+    if (signal.aborted) controller.abort(abortReason(signal));
+    else signal.addEventListener("abort", onAbort, { once: true });
+  }
+
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    },
+  };
 }
 
 export async function fetchWithRetry<T>(opts: FetchWithRetryOptions<T>): Promise<T> {
@@ -77,15 +122,18 @@ export async function fetchWithRetry<T>(opts: FetchWithRetryOptions<T>): Promise
     const delay = retryDelaysMs[attempt] ?? 0;
     if (delay > 0) await sleep(delay, signal); // throws on abort
 
+    const attemptSig = attemptSignal(timeoutMs, signal);
     try {
-      const timeoutSig = AbortSignal.timeout(timeoutMs);
-      const composed = signal ? AbortSignal.any([signal, timeoutSig]) : timeoutSig;
-      const res = await fetch(url, { signal: composed, ...(headers ? { headers } : {}) });
+      const res = await fetch(url, { signal: attemptSig.signal, ...(headers ? { headers } : {}) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await parse(res);
     } catch (err) {
       if (signal?.aborted) throw abortReason(signal);
       lastErr = err;
+    } finally {
+      // Runs after `parse` resolves too, so the timeout still bounds body
+      // reads — and the listener never outlives the attempt.
+      attemptSig.dispose();
     }
   }
 
@@ -142,8 +190,32 @@ export function createSnapshotPoller<T>(config: SnapshotPollerConfig<T>): Snapsh
   let cached: { snapshot: T; cachedAt: number } | null = null;
   let interval: ReturnType<typeof setInterval> | undefined;
   let abortController: AbortController | null = null;
+  // Per-poll token rather than a bare boolean. A boolean has no owner: after
+  // stop() releases it and a new poll starts, the *abandoned* poll's finally
+  // would clear the guard while the new one is still running, letting the
+  // next tick overlap and restoring exactly the defect this guard removes.
+  // Only the poll that currently owns the slot may release it.
+  let pollSeq = 0;
+  let activeToken: number | null = null;
 
   async function pollOnce(): Promise<void> {
+    // Skip rather than overlap (#140). Worst-case airspace poll is ~17s
+    // (3 attempts x 5s timeout plus 2s of backoff) against an 8s interval, so
+    // without this a slow upstream produces concurrent polls that:
+    //   - orphan the previous AbortController, since the field is overwritten
+    //     and stop() then aborts only the newest, leaving earlier fetches
+    //     running and holding the event loop open
+    //   - write out of order, letting an older snapshot overwrite a newer one
+    //     and then stamp it with a fresh cachedAt — serving stale data as live
+    //   - double the request rate against the upstream exactly during an
+    //     incident, contradicting this poller's own rate-limit etiquette
+    if (activeToken !== null) {
+      logger.warn("poll skipped, previous still in flight", { poller: name });
+      return;
+    }
+    const token = ++pollSeq;
+    activeToken = token;
+
     abortController = new AbortController();
     const signal = abortController.signal;
     const startTime = Date.now();
@@ -168,6 +240,10 @@ export function createSnapshotPoller<T>(config: SnapshotPollerConfig<T>): Snapsh
         cached = null;
         logger.warn("poll failed, no cache", { poller: name, err });
       }
+    } finally {
+      // Only release if we still own the slot — an abandoned poll settling
+      // after stop()/restart must not unblock the poll that replaced it.
+      if (activeToken === token) activeToken = null;
     }
   }
 
@@ -183,6 +259,11 @@ export function createSnapshotPoller<T>(config: SnapshotPollerConfig<T>): Snapsh
         interval = undefined;
       }
       abortController?.abort(new Error("poller stopped"));
+      // Release the slot: the in-flight poll is being aborted, and a
+      // subsequent start() must not be blocked by its pending rejection.
+      // The abandoned poll's finally is now a no-op, since it no longer
+      // owns the token.
+      activeToken = null;
     },
     pollOnce,
     getCurrent: () => snapshot,
