@@ -164,8 +164,16 @@ describe("buildShapeIndex — cache lifecycle on rebuild (#138)", () => {
     const b = makeRoutes([{ routeId: "3", coords: bCoords }]);
 
     const a1 = buildShapeIndex(a);
-    findTrackPath(a1, "3", aCoords[5]!, aCoords[10]!);
-    buildShapeIndex(b);
+
+    // Warm b FIRST, at the same grid cell the final `a` lookup will use.
+    // Order matters: under the old routeId key both share one entry, so
+    // whichever is written first wins. Warming `a` first would let `a`'s own
+    // value satisfy the final assertion and the test would pass even with the
+    // bug present — which is exactly how the first version of this test was
+    // vacuous.
+    const b1 = buildShapeIndex(b);
+    findTrackPath(b1, "3", bCoords[5]!, aCoords[10]!);
+
     const a2 = buildShapeIndex(a); // memo hit — the old clear never ran here
 
     expect(a2).toBe(a1);
