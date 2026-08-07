@@ -7,10 +7,19 @@
     "dev:client": "pnpm --filter @panoptrain/client dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
-    "lint": "eslint packages/*/src --ext .ts,.tsx",
+    "lint": "eslint .",
     "test": "pnpm -r --if-present test",
     "test:e2e": "pnpm --filter @panoptrain/e2e test:e2e",
     "download-gtfs": "pnpm --filter @panoptrain/server download-gtfs",
-    "download-gtfs:lirr": "pnpm --filter @panoptrain/server download-gtfs:lirr"
+    "download-gtfs:lirr": "pnpm --filter @panoptrain/server download-gtfs:lirr",
+    "lint:fix": "eslint . --fix",
+    "test:coverage": "pnpm -r --if-present test:coverage"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.9.0",
+    "typescript-eslint": "^8.66.0"
   }
 }

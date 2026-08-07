@@ -11,7 +11,8 @@
     "download-gtfs": "tsx scripts/download-gtfs.ts",
     "download-gtfs:lirr": "tsx scripts/download-gtfs.ts lirr",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.0",
@@ -31,6 +32,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
+    "@vitest/coverage-v8": "^4.1.10",
     "msw": "^2.15.0",
     "tsx": "^4.23.5",
     "typescript": "^6.0.3",

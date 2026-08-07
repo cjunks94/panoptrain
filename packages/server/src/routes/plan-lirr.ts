@@ -62,7 +62,7 @@ planLirr.get("/", (c) => {
   try {
     gtfs = loadStaticGtfs("lirr");
     schedule = loadLirrSchedule();
-  } catch (err) {
+  } catch {
     return c.json(
       { error: "LIRR data not available — server-side GTFS download required" },
       503,

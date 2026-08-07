@@ -8,7 +8,6 @@ const PENN = "237";
 const JAMAICA = "102";
 const BABYLON = "27";
 const HEMPSTEAD = "84";
-const ATLANTIC = "241";
 
 let gtfs: StaticGtfsData;
 let schedule: LirrScheduleData;

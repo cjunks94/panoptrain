@@ -30,7 +30,6 @@ export interface AirportFocusOptions {
 }
 
 const SIDEBAR_WIDTH_PX = 260;
-const MOBILE_PANEL_VH_FRACTION = 0.75;
 
 /** MapLibre's offset prop semantics: positive y shifts the destination
  *  point DOWN on screen (so a positive y-offset means "the airport
