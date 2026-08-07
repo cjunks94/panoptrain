@@ -29,6 +29,27 @@ function dependantCount(signal: AbortSignal): number {
 }
 
 describe("#128 — long-lived signal does not accumulate state", () => {
+  /**
+   * Positive control for the probe itself. `dependantCount` reads a Node
+   * internal symbol; if Node ever renames or removes it the probe silently
+   * returns 0 and the two assertions below would pass without testing
+   * anything. This proves the probe can still observe a non-zero count on
+   * the running Node version — if it fails, the #128 assertions are vacuous
+   * and need a new mechanism, not deletion.
+   */
+  it("sanity: the dependant-signal probe still observes AbortSignal.any", () => {
+    const source = new AbortController();
+    expect(dependantCount(source.signal)).toBe(0);
+
+    // Retain the composites so GC can't confound the reading.
+    const composites = Array.from({ length: 5 }, () =>
+      AbortSignal.any([source.signal, new AbortController().signal]),
+    );
+
+    expect(composites).toHaveLength(5);
+    expect(dependantCount(source.signal)).toBeGreaterThan(0);
+  });
+
   const originalFetch = globalThis.fetch;
   afterEach(() => {
     globalThis.fetch = originalFetch;
@@ -255,7 +276,19 @@ describe("#140 — snapshot poller does not overlap itself", () => {
     await Promise.resolve();
     expect(n).toBe(2); // a fresh poll is accepted rather than skipped
 
-    releases.forEach((r) => r());
-    await Promise.all([first, second]);
+    // The abandoned poll A now settles while poll B is still running. With a
+    // bare boolean guard, A's finally would clear the slot and the next tick
+    // would overlap B — reintroducing the orphaned controller and
+    // out-of-order snapshot write that #140 removes. The per-poll token means
+    // A no longer owns the slot, so its release is a no-op.
+    releases[0]();
+    await first;
+
+    const third = poller.pollOnce();
+    await Promise.resolve();
+    expect(n).toBe(2); // still skipped — B owns the slot
+
+    releases.slice(1).forEach((r) => r());
+    await Promise.all([second, third]);
   });
 });
