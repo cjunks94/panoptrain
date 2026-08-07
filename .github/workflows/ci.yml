@@ -35,7 +35,12 @@ jobs:
           path: |
             packages/server/src/data/gtfs
             packages/server/src/data/gtfs-lirr
-          key: gtfs-static-v3-subway-lirr-schedule
+          # BUMP THIS when download-gtfs.ts changes the SHAPE of the emitted
+          # data (a new *.json file, a new field). The restore gate below only
+          # checks stops.json, so a stale cache otherwise satisfies it and the
+          # download is skipped -- leaving the new file absent and failing
+          # tests that depend on it. v4 adds transfers.json (#126).
+          key: gtfs-static-v4-subway-lirr-transfers
 
       - name: Download GTFS data if not cached
         if: matrix.task == 'test'
@@ -78,7 +83,12 @@ jobs:
           path: |
             packages/server/src/data/gtfs
             packages/server/src/data/gtfs-lirr
-          key: gtfs-static-v3-subway-lirr-schedule
+          # BUMP THIS when download-gtfs.ts changes the SHAPE of the emitted
+          # data (a new *.json file, a new field). The restore gate below only
+          # checks stops.json, so a stale cache otherwise satisfies it and the
+          # download is skipped -- leaving the new file absent and failing
+          # tests that depend on it. v4 adds transfers.json (#126).
+          key: gtfs-static-v4-subway-lirr-transfers
 
       - name: Download GTFS data if not cached
         run: |
