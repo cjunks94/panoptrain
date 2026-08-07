@@ -112,11 +112,17 @@ export default function App() {
       : transitMode === "subway" ? ["lirr"] : ["subway"];
 
     let cancelled = false;
+    // These are the same multi-MB payloads the foreground fetch pulls, and
+    // this is a *background* preload — so cleanup must actually abort them,
+    // not merely skip the cache write. Without this, a few quick mode flips
+    // leave several preload downloads and JSON parses running concurrently
+    // with the foreground load they were meant to get ahead of (#133).
+    const controller = new AbortController();
     const handle = scheduleIdle(() => {
       if (cancelled) return;
       for (const mode of inactive) {
         if (!getCachedRoutes(mode)) {
-          fetchRoutes(mode)
+          fetchRoutes(mode, controller.signal)
             .then((r) => {
               // Re-check on resolve: if a foreground useRouteShapes
               // fetch beat us to it, don't overwrite (would change the
@@ -126,7 +132,7 @@ export default function App() {
             .catch(() => { /* preload is best-effort */ });
         }
         if (!getCachedStops(mode)) {
-          fetchStops(mode)
+          fetchStops(mode, controller.signal)
             .then((s) => {
               if (!cancelled && !getCachedStops(mode)) setCachedStops(mode, s);
             })
@@ -138,6 +144,7 @@ export default function App() {
     return () => {
       cancelled = true;
       cancelIdle(handle);
+      controller.abort();
     };
   }, [transitMode]);
 

@@ -26,10 +26,17 @@ export function useRouteShapes(mode: Mode | null): UseRouteShapesResult {
   // from "either payload is still null" and nothing ever retried or surfaced
   // the failure. The map pulsed "Loading subway routes..." for the rest of the
   // session and trains fell back to linear interpolation (#133).
-  const [error, setError] = useState<Error | null>(null);
+  // Tracked per resource, not as one flag. Routes and stops load in
+  // parallel, so a single `error` let a later routes success clear a stops
+  // failure — `stopsGeoJson` stays null, `loading` flips back to true, and
+  // the badge spins forever again. Exactly the bug being fixed, reintroduced
+  // through the shared slot.
+  const [routesError, setRoutesError] = useState<Error | null>(null);
+  const [stopsError, setStopsError] = useState<Error | null>(null);
   const [attempt, setAttempt] = useState(0);
   const retry = useCallback(() => {
-    setError(null);
+    setRoutesError(null);
+    setStopsError(null);
     setAttempt((n) => n + 1);
   }, []);
 
@@ -39,6 +46,12 @@ export function useRouteShapes(mode: Mode | null): UseRouteShapesResult {
     // are multi-MB, so toggling Subway<->LIRR a few times on mobile
     // previously left several downloads and JSON parses running concurrently.
     const controller = new AbortController();
+
+    // Clear stale failures from the previous mode — otherwise switching to a
+    // fully-cached mode would surface the old mode's error badge over a map
+    // that loaded fine.
+    setRoutesError(null);
+    setStopsError(null);
 
     if (mode === null) {
       // Airspace view — clear transit shapes (no place for them here).
@@ -63,12 +76,12 @@ export function useRouteShapes(mode: Mode | null): UseRouteShapesResult {
           if (cancelled) return;
           setCachedStops(mode, stops);
           setStopsGeoJson(enrichStops(stops));
-          setError(null);
+          setStopsError(null);
         })
         .catch((err) => {
           if (cancelled || controller.signal.aborted) return;
           console.error("Failed to load stops:", err);
-          setError(err instanceof Error ? err : new Error(String(err)));
+          setStopsError(err instanceof Error ? err : new Error(String(err)));
         });
     }
 
@@ -78,12 +91,12 @@ export function useRouteShapes(mode: Mode | null): UseRouteShapesResult {
           if (cancelled) return;
           setCachedRoutes(mode, routes);
           setRouteShapes(routes);
-          setError(null);
+          setRoutesError(null);
         })
         .catch((err) => {
           if (cancelled || controller.signal.aborted) return;
           console.error("Failed to load routes:", err);
-          setError(err instanceof Error ? err : new Error(String(err)));
+          setRoutesError(err instanceof Error ? err : new Error(String(err)));
         });
     }
 
@@ -100,8 +113,13 @@ export function useRouteShapes(mode: Mode | null): UseRouteShapesResult {
   // On airspace there's nothing to load, so loading is always false there.
   // Once a load has failed we are no longer "loading" — otherwise the badge
   // spins forever on a transient network blip.
+  const error = routesError ?? stopsError;
+  // Still loading only if the pending payload has NOT failed — a stops
+  // failure must not be masked by routes still being in flight.
   const loading =
-    mode !== null && error === null && (routeShapes === null || stopsGeoJson === null);
+    mode !== null &&
+    ((routeShapes === null && routesError === null) ||
+      (stopsGeoJson === null && stopsError === null));
   return { routeShapes, stopsGeoJson, loading, error, retry };
 }
 

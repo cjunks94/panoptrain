@@ -183,6 +183,46 @@ describe("#133 — backoff on repeated failure", () => {
     poller.stop();
   });
 
+  it("should not resume full cadence while a backoff retry is still pending", async () => {
+    // Regression: scheduleBackoff used to recreate the steady interval
+    // immediately after firing the retry. With the default inFlightGuard
+    // (false) and a retry that stays pending longer than intervalMs, that
+    // resumed full-cadence requests against a server that is still down —
+    // recreating the pileup backoff exists to prevent.
+    let calls = 0;
+    const pending = deferred<{ data: string; source: "live" }>();
+    const poller = createBulkPoller<string>({
+      fetch: () => {
+        calls++;
+        // First call fails immediately to trigger backoff; the retry hangs.
+        if (calls === 1) return Promise.reject(new Error("down"));
+        return pending.promise;
+      },
+      initialData: "initial",
+      intervalMs: INTERVAL,
+      onState: () => {},
+    });
+
+    poller.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(INTERVAL); // backoff fires the retry
+    expect(calls).toBe(2);
+
+    // Retry is still in flight. No further requests may be issued.
+    await vi.advanceTimersByTimeAsync(INTERVAL * 5);
+    expect(calls).toBe(2);
+
+    pending.resolve({ data: "recovered", source: "live" });
+    await vi.advanceTimersByTimeAsync(0);
+    // Steady cadence restored only now that it succeeded.
+    await vi.advanceTimersByTimeAsync(INTERVAL);
+    expect(calls).toBe(3);
+
+    poller.stop();
+  });
+
   it("should clear a pending backoff timer on stop", async () => {
     let calls = 0;
     const poller = createBulkPoller<string>({

@@ -97,8 +97,13 @@ export function createBulkPoller<TData>(config: CreateBulkPollerConfig<TData>): 
     clearTimeout(backoffTimer);
     backoffTimer = setTimeout(() => {
       if (stopped) return;
+      // Fire the retry only. Do NOT restore the steady interval here: the
+      // retry may stay pending longer than intervalMs, and with the default
+      // `inFlightGuard: false` that would resume full-cadence requests while
+      // the server is still down — recreating the pileup backoff exists to
+      // prevent. The interval is restored from pollOnce's success path
+      // (resumeSteadyInterval); a failed retry schedules the next backoff.
       void pollOnce();
-      if (!interval && !stopped) interval = setInterval(() => void pollOnce(), intervalMs);
     }, backoffFor(failures));
   }
 
