@@ -37,7 +37,13 @@ export default function App() {
   const lineFilterMode = transitMode ?? lastTransitModeRef.current;
 
   const { data, isStale, lastUpdated } = useTrainPositions(transitMode);
-  const { routeShapes, stopsGeoJson, loading: routeShapesLoading } = useRouteShapes(transitMode);
+  const {
+    routeShapes,
+    stopsGeoJson,
+    loading: routeShapesLoading,
+    error: routeShapesError,
+    retry: retryRouteShapes,
+  } = useRouteShapes(transitMode);
   const { visibleRoutes, toggleRoute, toggleGroup, allOn, allOff } = useLineFilter(lineFilterMode);
   const { aircraft } = useAircraftPositions(view === "airspace");
   // METAR + TAF feeds only matter when the user can open an airport
@@ -165,6 +171,8 @@ export default function App() {
         mode={transitMode}
         panelOpen={panelOpen}
         routeShapesLoading={routeShapesLoading}
+        routeShapesError={routeShapesError}
+        onRetryRouteShapes={retryRouteShapes}
         aircraft={aircraft}
         metarReports={metarReports}
         tafReports={tafReports}

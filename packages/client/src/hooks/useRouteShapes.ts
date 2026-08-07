@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import type { Mode, RoutesGeoJSON, StopsGeoJSON } from "@panoptrain/shared";
 import { fetchRoutes, fetchStops } from "../lib/api.js";
 import {
@@ -12,14 +12,33 @@ interface UseRouteShapesResult {
   routeShapes: RoutesGeoJSON | null;
   stopsGeoJson: StopsGeoJSON | null;
   loading: boolean;
+  /** Non-null when the last load attempt failed. Consumers can surface this
+   *  instead of spinning forever. */
+  error: Error | null;
+  /** Re-runs the fetch for the current mode. Stable identity. */
+  retry: () => void;
 }
 
 export function useRouteShapes(mode: Mode | null): UseRouteShapesResult {
   const [routeShapes, setRouteShapes] = useState<RoutesGeoJSON | null>(null);
   const [stopsGeoJson, setStopsGeoJson] = useState<StopsGeoJSON | null>(null);
+  // A failed load previously left `loading` true forever, because it derives
+  // from "either payload is still null" and nothing ever retried or surfaced
+  // the failure. The map pulsed "Loading subway routes..." for the rest of the
+  // session and trains fell back to linear interpolation (#133).
+  const [error, setError] = useState<Error | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => {
+    setError(null);
+    setAttempt((n) => n + 1);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
+    // Real cancellation, not just ignoring the result (#133). These payloads
+    // are multi-MB, so toggling Subway<->LIRR a few times on mobile
+    // previously left several downloads and JSON parses running concurrently.
+    const controller = new AbortController();
 
     if (mode === null) {
       // Airspace view — clear transit shapes (no place for them here).
@@ -39,37 +58,51 @@ export function useRouteShapes(mode: Mode | null): UseRouteShapesResult {
     setStopsGeoJson(cachedStops ? enrichStops(cachedStops) : null);
 
     if (!cachedStops) {
-      fetchStops(mode)
+      fetchStops(mode, controller.signal)
         .then((stops) => {
           if (cancelled) return;
           setCachedStops(mode, stops);
           setStopsGeoJson(enrichStops(stops));
+          setError(null);
         })
-        .catch((err) => console.error("Failed to load stops:", err));
+        .catch((err) => {
+          if (cancelled || controller.signal.aborted) return;
+          console.error("Failed to load stops:", err);
+          setError(err instanceof Error ? err : new Error(String(err)));
+        });
     }
 
     if (!cachedRoutes) {
-      fetchRoutes(mode)
+      fetchRoutes(mode, controller.signal)
         .then((routes) => {
           if (cancelled) return;
           setCachedRoutes(mode, routes);
           setRouteShapes(routes);
+          setError(null);
         })
-        .catch((err) => console.error("Failed to load routes:", err));
+        .catch((err) => {
+          if (cancelled || controller.signal.aborted) return;
+          console.error("Failed to load routes:", err);
+          setError(err instanceof Error ? err : new Error(String(err)));
+        });
     }
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [mode]);
+  }, [mode, attempt]);
 
   // Derive `loading` from state so it accurately reflects "any payload still
   // pending". With the parallel-fetch pattern a single useState flag would
   // either lie (flips early when one fetch finishes) or hang forever (waits
   // only for one). Consumers can also gate on the individual values directly.
   // On airspace there's nothing to load, so loading is always false there.
-  const loading = mode !== null && (routeShapes === null || stopsGeoJson === null);
-  return { routeShapes, stopsGeoJson, loading };
+  // Once a load has failed we are no longer "loading" — otherwise the badge
+  // spins forever on a transient network blip.
+  const loading =
+    mode !== null && error === null && (routeShapes === null || stopsGeoJson === null);
+  return { routeShapes, stopsGeoJson, loading, error, retry };
 }
 
 const MAX_LABEL_ROUTES = 6;

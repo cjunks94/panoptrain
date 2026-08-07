@@ -206,6 +206,10 @@ interface TransitMapProps {
   /** Routes/stops still in flight. Drives the loading badge so a cold mode
    *  flip doesn't read as a frozen blank map. */
   routeShapesLoading: boolean;
+  /** Non-null when the routes/stops load failed — surfaces a retry badge
+   *  instead of leaving the map silently empty (#133). */
+  routeShapesError?: Error | null;
+  onRetryRouteShapes?: () => void;
   /** Live aircraft to render on the airspace overlay. Empty array when the
    *  overlay is toggled off, so the layer can mount unconditionally and
    *  the only branch is data presence. */
@@ -241,7 +245,7 @@ const POPUP_OFFSET_PX = 120;
  *  position so map curvature doesn't matter. */
 const POPUP_AHEAD_DEG = 0.001;
 
-export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, stops, planRoute, planRouteIds, mode, panelOpen, routeShapesLoading, aircraft, metarReports, tafReports, popupAirportIata, onPopupAirportIataChange, flyToToken }: TransitMapProps) {
+export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, stops, planRoute, planRouteIds, mode, panelOpen, routeShapesLoading, routeShapesError, onRetryRouteShapes, aircraft, metarReports, tafReports, popupAirportIata, onPopupAirportIataChange, flyToToken }: TransitMapProps) {
   const [popupTripId, setPopupTripId] = useState<string | null>(null);
   const [iconsReady, setIconsReady] = useState(false);
   const [followTripId, setFollowTripId] = useState<string | null>(null);
@@ -848,7 +852,9 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
 
   return (
     <>
-    {routeShapesLoading && mode !== null && <MapLoadingBadge mode={mode} />}
+    {mode !== null && (routeShapesLoading || routeShapesError) && (
+      <MapLoadingBadge mode={mode} error={routeShapesError} onRetry={onRetryRouteShapes} />
+    )}
     <Map
       ref={mapRef}
       initialViewState={NYC_CENTER}

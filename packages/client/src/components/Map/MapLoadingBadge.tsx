@@ -2,6 +2,11 @@ import type { Mode } from "@panoptrain/shared";
 
 interface MapLoadingBadgeProps {
   mode: Mode;
+  /** When set, the load failed — render a retry affordance instead of a
+   *  spinner. Without this the badge simply disappeared on failure and the
+   *  user was left with a silently empty map (#133). */
+  error?: Error | null;
+  onRetry?: () => void;
 }
 
 /**
@@ -14,8 +19,54 @@ interface MapLoadingBadgeProps {
  * (cache hits, warm sessions) — if shapes arrive before the delay
  * elapses, the badge unmounts without ever fading in.
  */
-export function MapLoadingBadge({ mode }: MapLoadingBadgeProps) {
+export function MapLoadingBadge({ mode, error, onRetry }: MapLoadingBadgeProps) {
   const label = mode === "lirr" ? "LIRR" : "subway";
+
+  if (error) {
+    return (
+      <div
+        role="alert"
+        style={{
+          position: "absolute",
+          top: 16,
+          left: "50%",
+          transform: "translateX(-50%)",
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          padding: "6px 10px 6px 14px",
+          borderRadius: 20,
+          background: "rgba(69, 10, 10, 0.92)",
+          border: "1px solid rgba(248, 113, 113, 0.4)",
+          color: "#fecaca",
+          fontSize: 12,
+          fontWeight: 600,
+          zIndex: 10,
+        }}
+      >
+        <span>Couldn’t load {label} routes</span>
+        {onRetry && (
+          <button
+            type="button"
+            onClick={onRetry}
+            style={{
+              padding: "3px 10px",
+              borderRadius: 12,
+              border: "1px solid rgba(248, 113, 113, 0.5)",
+              background: "rgba(248, 113, 113, 0.15)",
+              color: "#fecaca",
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            Retry
+          </button>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div
       role="status"
