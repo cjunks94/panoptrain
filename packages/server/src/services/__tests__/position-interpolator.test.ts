@@ -22,6 +22,7 @@ describe("enrichWithStatic", () => {
       shapes: {},
       stopSequences: {},
       stopDistances: {},
+      transfers: [],
     };
   }
 
@@ -98,6 +99,7 @@ describe("interpolatePositions cross-mode isolation", () => {
       stopDistances: {
         [shapeId]: { STOP1: 0, STOP2: 1.1 },
       },
+      transfers: [],
     };
   }
 
@@ -155,6 +157,7 @@ describe("interpolatePositions cross-mode isolation", () => {
         ],
       },
       stopDistances: { "subway-A-shape": { STOP1: 0, STOP2: 1.1 } },
+      transfers: [],
     };
 
     interpolatePositions([vehicle("1", "STOP1")], [], lirr);
@@ -215,6 +218,7 @@ describe("estimateFromTripUpdate next-stop semantics", () => {
         ],
       },
       stopDistances: { "sh-1": { S1: 0, S2: 1.1, S3: 2.2 } },
+      transfers: [],
     };
   }
 
@@ -331,6 +335,7 @@ describe("prewarmInterpolator", () => {
       trips: { t1: { tripId: "t1", routeId: "1", shapeId: "sh1", directionId: 0, tripHeadsign: "H" } },
       stopSequences: { "1-0-sh1": [{ stopId: "S1", stopSequence: 1 }] },
       stopDistances: { sh1: { S1: 0 } },
+      transfers: [],
     };
   }
 
@@ -413,6 +418,7 @@ describe("estimateVehicle walk-forward past arriveNext", () => {
         ],
       },
       stopDistances: { "sh-1": { S1: 0, S2: 2.2, S3: 4.4, S4: 6.6 } },
+      transfers: [],
     };
   }
 

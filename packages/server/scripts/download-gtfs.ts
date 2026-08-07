@@ -88,6 +88,13 @@ interface RawCalendar {
   end_date: string;
 }
 
+interface RawTransfer {
+  from_stop_id: string;
+  to_stop_id: string;
+  transfer_type: string;
+  min_transfer_time: string;
+}
+
 interface RawCalendarDate {
   service_id: string;
   date: string; // YYYYMMDD
@@ -157,7 +164,7 @@ async function main() {
   };
 
   // Parse all CSVs in parallel
-  const [rawStops, rawRoutes, rawShapes, rawTrips, rawStopTimes, rawCalendar, rawCalendarDates] =
+  const [rawStops, rawRoutes, rawShapes, rawTrips, rawStopTimes, rawCalendar, rawCalendarDates, rawTransfers] =
     await Promise.all([
       readCsv<RawStop>("stops.txt"),
       readCsv<RawRoute>("routes.txt"),
@@ -166,12 +173,17 @@ async function main() {
       readCsv<RawStopTime>("stop_times.txt"),
       readCsvOptional<RawCalendar>("calendar.txt"),
       readCsvOptional<RawCalendarDate>("calendar_dates.txt"),
+      // Optional per the GTFS spec. Both MTA feeds ship it today; if a feed
+      // ever drops it the planner degrades to same-parent platform transfers
+      // only rather than inventing cross-station edges (#126).
+      readCsvOptional<RawTransfer>("transfers.txt"),
     ]);
 
   console.log(
     `Parsed: ${rawStops.length} stops, ${rawRoutes.length} routes, ` +
       `${rawShapes.length} shape points, ${rawTrips.length} trips, ${rawStopTimes.length} stop times, ` +
-      `${rawCalendar.length} calendar rows, ${rawCalendarDates.length} calendar exceptions`,
+      `${rawCalendar.length} calendar rows, ${rawCalendarDates.length} calendar exceptions, ` +
+      `${rawTransfers.length} transfers`,
   );
 
   // Process stops — only keep stations (location_type=1 or parent stations)
@@ -360,6 +372,20 @@ async function main() {
     }));
     write("calendar_dates.json", calendarDates);
   }
+
+  // Authoritative transfer graph. Rows where from == to are GTFS's way of
+  // stating the in-station transfer time for a complex; rows where they
+  // differ are genuine walkable connections between distinct parent
+  // stations. Both are needed, and they mean different things, so keep the
+  // distinction rather than flattening.
+  const transfers = rawTransfers.map((t) => ({
+    fromStopId: t.from_stop_id,
+    toStopId: t.to_stop_id,
+    transferType: parseInt(t.transfer_type, 10),
+    // Blank for transfer_type 0/1; only type 2 carries a required time.
+    minTransferSeconds: t.min_transfer_time ? parseInt(t.min_transfer_time, 10) : null,
+  }));
+  write("transfers.json", transfers);
 
   console.log("Done! Static GTFS data processed successfully.");
 }

@@ -11,6 +11,14 @@ function dataDirFor(mode: Mode): string {
   return mode === "subway" ? join(BASE_DATA_DIR, "gtfs") : join(BASE_DATA_DIR, `gtfs-${mode}`);
 }
 
+/** Like `loadJson` but returns `fallback` when the file is absent, for data
+ *  files added after existing deployments were built. */
+function loadJsonOptional<T>(mode: Mode, filename: string, fallback: T): T {
+  const path = join(dataDirFor(mode), filename);
+  if (!existsSync(path)) return fallback;
+  return JSON.parse(readFileSync(path, "utf-8")) as T;
+}
+
 function loadJson<T>(mode: Mode, filename: string): T {
   const path = join(dataDirFor(mode), filename);
   if (!existsSync(path)) {
@@ -42,6 +50,29 @@ export interface StaticGtfsData {
   >;
   stopSequences: Record<string, { stopId: string; stopSequence: number }[]>;
   stopDistances: Record<string, Record<string, number>>; // shapeId -> stopId -> km
+  /** GTFS transfers.txt. Authoritative source for which stations connect —
+   *  see `buildStationGraph`. Empty when the data predates #126 or the feed
+   *  omits the (optional) file. */
+  transfers: GtfsTransfer[];
+}
+
+/**
+ * GTFS transfers.txt row.
+ *
+ * Two distinct meanings share the file:
+ *  - `fromStopId === toStopId` states the in-station transfer time for a
+ *    complex, i.e. how long it takes to change platforms within one parent.
+ *  - `fromStopId !== toStopId` is a genuine walkable connection between two
+ *    distinct parent stations (Times Sq <-> Port Authority, Cortlandt St <->
+ *    Chambers St). The longest in the current subway feed is 435m.
+ */
+export interface GtfsTransfer {
+  fromStopId: string;
+  toStopId: string;
+  /** GTFS transfer_type. MTA emits 2 ("requires min_transfer_time") for all rows. */
+  transferType: number;
+  /** Seconds; null for transfer types that don't require a time. */
+  minTransferSeconds: number | null;
 }
 
 /** GTFS calendar row — defines which days of the week a service runs. */
@@ -98,6 +129,7 @@ export function loadStaticGtfs(mode: Mode = "subway"): StaticGtfsData {
     shapes: loadJson(mode, "shapes.json"),
     trips: loadJson(mode, "trips.json"),
     stopSequences: loadJson(mode, "stop_sequences.json"),
+    transfers: loadJsonOptional<GtfsTransfer[]>(mode, "transfers.json", []),
     stopDistances: loadJson(mode, "stop_distances.json"),
   };
   console.log(
