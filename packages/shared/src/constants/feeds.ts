@@ -24,12 +24,29 @@ export const LIRR_FEEDS = [
 ] as const;
 
 /** Static GTFS download URLs — quarterly schedule data, includes shapes,
- *  stops, routes, trips. */
+ *  stops, routes, trips.
+ *
+ *  These point at MTA's S3 origin rather than the documented
+ *  `web.mta.info/developers/data/...` links, because those links redirect
+ *  and the subway one **downgrades to plaintext on the way**:
+ *
+ *    https://web.mta.info/.../subway/google_transit.zip
+ *      -> (2 hops) -> http://rrgtfsfeeds.s3.amazonaws.com/gtfs_subway.zip
+ *
+ *  Simply changing the scheme on the mta.info URL therefore looks correct
+ *  but still transfers the archive in the clear — undici follows a
+ *  https->http redirect without complaint. Pointing at the S3 origin gives
+ *  end-to-end TLS with zero redirects. `assertHttps` in
+ *  `scripts/download-gtfs.ts` enforces that this stays true.
+ *
+ *  Trade-off: this couples us to the bucket name rather than MTA's
+ *  documented redirect. If MTA moves buckets the build fails loudly at the
+ *  download step, which is the intended behaviour (see Dockerfile). */
 export const SUBWAY_GTFS_STATIC_URL =
-  "http://web.mta.info/developers/data/nyct/subway/google_transit.zip";
+  "https://rrgtfsfeeds.s3.amazonaws.com/gtfs_subway.zip";
 
 export const LIRR_GTFS_STATIC_URL =
-  "http://web.mta.info/developers/data/lirr/google_transit.zip";
+  "https://rrgtfsfeeds.s3.amazonaws.com/gtfslirr.zip";
 
 export function feedsForMode(mode: Mode): readonly { id: string; url: string; lines: readonly string[] }[] {
   return mode === "subway" ? SUBWAY_FEEDS : LIRR_FEEDS;
