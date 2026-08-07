@@ -402,7 +402,17 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     return () => {
       map.off("move", reposition);
     };
-  }, [geojsonRef]);
+    // `iconsReady`, not `geojsonRef` (#134). geojsonRef is a useRef whose
+    // identity never changes, so the effect ran exactly once — at mount,
+    // when mapRef.current is still null because react-maplibre creates the
+    // map instance inside its own async effect. The guard above hit, the
+    // effect never re-ran, and the listener was never attached: the popup
+    // silently detached from its train on every pan between polls, which is
+    // precisely what this effect exists to prevent.
+    //
+    // iconsReady flips true in onLoad, i.e. once the map genuinely exists,
+    // so it is the correct re-run trigger.
+  }, [geojsonRef, iconsReady]);
 
   // If the followed train falls out of the snapshot (5min stale eviction,
   // route filter, mode switch), clear follow so the camera doesn't lock to
@@ -501,18 +511,23 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
   useEffect(() => {
     const isAirspaceNow = mode === null;
     if (isAirspaceNow && !lastWasAirspace.current) {
-      lastFitMode.current = "airspace";
       const map = mapRef.current?.getMap();
-      if (map) {
-        map.fitBounds(
-          [[-74.5, 40.2], [-73.4, 41.1]],
-          { padding: fitPadding, duration: 800, maxZoom: 11 },
-        );
-      }
+      // Same mount-timing problem as the popup effect (#134): at mount the
+      // map does not exist yet. Previously the fit was skipped but
+      // lastWasAirspace was still set, *consuming* the transition — so a
+      // user whose persisted view is "airspace" landed at the default centre
+      // and never got the metro bbox until they left the mode and came back.
+      // Return without consuming; iconsReady re-runs this once the map is up.
+      if (!map) return;
+      lastFitMode.current = "airspace";
+      map.fitBounds(
+        [[-74.5, 40.2], [-73.4, 41.1]],
+        { padding: fitPadding, duration: 800, maxZoom: 11 },
+      );
     }
     lastWasAirspace.current = isAirspaceNow;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mode is the only relevant trigger; fitPadding read at fit time
-  }, [mode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mode/iconsReady are the relevant triggers; fitPadding read at fit time
+  }, [mode, iconsReady]);
 
   // Auto-fit the viewport to the planned route so users immediately see the
   // whole trip — fixes the case where one segment goes off-screen (e.g. an
