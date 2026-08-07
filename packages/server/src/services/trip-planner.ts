@@ -66,27 +66,58 @@ export function buildStationGraph(gtfs: StaticGtfsData): StationGraph {
     childrenByParent.get(stop.parentStation)!.push(stop.stopId);
   }
 
-  // Also group all platforms by parent station NAME — NYC complex stations
-  // (e.g., Union Sq, Times Sq, Atlantic-Barclays) have separate parent stations
-  // per line group that share the same stopName.
-  const platformsByName = new Map<string, string[]>();
-  for (const stop of Object.values(gtfs.stops)) {
-    if (stop.parentStation) continue; // only parents
-    const platforms = childrenByParent.get(stop.stopId) ?? [];
-    if (platforms.length === 0) continue;
-    if (!platformsByName.has(stop.stopName)) {
-      platformsByName.set(stop.stopName, []);
-    }
-    platformsByName.get(stop.stopName)!.push(...platforms);
-  }
+  // Transfer edges come from GTFS transfers.txt, NOT from matching station
+  // names (#126).
+  //
+  // Name matching was catastrophically wrong: it connected every pair of
+  // parent stations sharing a stopName, with no proximity constraint. In the
+  // current subway feed that produced 133 bogus edges, the worst being
+  // `86 St` (Manhattan, 1 line) <-> `86 St` (Bay Ridge) — 21.8km apart, and
+  // Dijkstra actively preferred it because a transfer costs 5 while a stop
+  // costs 1. It also *missed* real transfers between differently-named
+  // stations, e.g. Times Sq <-> Port Authority and Cortlandt St <-> Chambers
+  // St.
+  //
+  // transfers.txt is authoritative for both directions of that problem: the
+  // longest genuine cross-station transfer in the feed is 435m, and it
+  // includes the differently-named pairs the name heuristic could never see.
+  const platformsOf = (stationId: string): string[] => {
+    const children = childrenByParent.get(stationId);
+    if (children && children.length > 0) return children;
+    // Flat feed (LIRR) or a parent with no children — the station IS the stop.
+    return gtfs.stops[stationId] ? [stationId] : [];
+  };
 
-  // Add bidirectional transfer edges between all platforms sharing a station name
-  for (const platforms of platformsByName.values()) {
-    if (platforms.length < 2) continue;
-    for (const a of platforms) {
-      for (const b of platforms) {
+  const linkAll = (aPlatforms: string[], bPlatforms: string[]): void => {
+    for (const a of aPlatforms) {
+      for (const b of bPlatforms) {
         if (a !== b) addEdge(a, { type: "transfer", to: b });
       }
+    }
+  };
+
+  for (const t of gtfs.transfers) {
+    const from = platformsOf(t.fromStopId);
+    const to = platformsOf(t.toStopId);
+    if (from.length === 0 || to.length === 0) continue;
+    // from === to is GTFS's encoding of "changing platforms inside this
+    // complex takes N seconds", which means linking that station's own
+    // platforms to each other. from !== to is a walkable inter-station
+    // connection. Both are emitted bidirectionally; MTA already lists each
+    // cross-station pair in both directions, and linkAll is idempotent in
+    // effect since duplicate edges only ever tie on cost.
+    linkAll(from, to);
+    if (t.fromStopId !== t.toStopId) linkAll(to, from);
+  }
+
+  // Fallback when transfers.txt is absent (older data dirs, or a feed that
+  // omits the optional file): connect only platforms within the same parent.
+  // That is always true by construction and cannot invent a teleport. It is
+  // deliberately NOT a fallback to name matching — degrading to the bug this
+  // replaced would be worse than losing a few complex transfers.
+  if (gtfs.transfers.length === 0) {
+    for (const platforms of childrenByParent.values()) {
+      linkAll(platforms, platforms);
     }
   }
 
@@ -288,6 +319,23 @@ export function planTrip(
       delay: null, // filled in below
     });
   }
+
+  // Drop leading/trailing transfer segments (#126).
+  //
+  // Dijkstra's target test fires on any state at a target platform, including
+  // one reached *via* a transfer edge — so a path can end by walking between
+  // two platforms of the destination complex. Symmetrically it can begin by
+  // walking off the origin platform before boarding. Neither is a transfer in
+  // the sense a rider cares about (changing trains); both render as a
+  // meaningless "Transfer at X" bookend and inflate transferCount.
+  //
+  // Trimmed after the segments are built rather than constrained during the
+  // search: the edges are legitimate for pathfinding, they just aren't worth
+  // showing. Only the outermost run is trimmed, so an interior transfer is
+  // always preserved.
+  while (segments.length > 0 && segments[0].type === "transfer") segments.shift();
+  while (segments.length > 0 && segments[segments.length - 1].type === "transfer") segments.pop();
+  if (segments.length === 0) return null;
 
   // Overlay real-time delays from current train snapshot
   enrichWithDelays(segments);
