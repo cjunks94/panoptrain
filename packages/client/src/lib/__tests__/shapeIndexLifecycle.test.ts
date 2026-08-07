@@ -86,14 +86,14 @@ describe("buildShapeIndex — back-and-forth between two routes payloads", () =>
   });
 });
 
-describe("buildShapeIndex — cache lifecycle on rebuild", () => {
-  // snapCache is keyed by globally-unique shapeId, so it stays warm
-  // across builds. bestShapeCache values are direct ShapeData refs and
-  // its keys are routeId-based — and routeIds can collide between
-  // subway and LIRR — so a stale ref would route the wrong line through
-  // findTrackPath. Verify the asymmetric clear: snap survives, bestShape
-  // resets each rebuild.
-  it("clears bestShapeCache but preserves snapCache when building a new index", () => {
+describe("buildShapeIndex — cache lifecycle on rebuild (#138)", () => {
+  // Both caches are now keyed by globally-unique shape ids, so neither needs
+  // clearing and both stay warm across a mode switch. The previous design
+  // cleared bestShapeCache on rebuild because its keys were routeId-based,
+  // but that clear sat *below* the memo early-return in buildShapeIndex — so
+  // on the subway -> LIRR -> subway path (a memo hit) it never ran, which is
+  // exactly the case it existed to protect.
+  it("keeps both caches warm across a rebuild", () => {
     const coordsA: [number, number][] = Array.from({ length: 30 }, (_, i) => [-74 + i * 0.001, 40.7]);
     const coordsB: [number, number][] = Array.from({ length: 30 }, (_, i) => [-73 + i * 0.001, 40.8]);
     const routesA = makeRoutes([{ routeId: "A", coords: coordsA }]);
@@ -107,7 +107,78 @@ describe("buildShapeIndex — cache lifecycle on rebuild", () => {
 
     buildShapeIndex(routesB);
     const afterRebuild = getTrackCacheSizes();
-    expect(afterRebuild.snap).toBeGreaterThanOrEqual(after.snap); // snap kept + B's prewarm seeded more
-    expect(afterRebuild.bestShape).toBe(0); // bestShape cleared on rebuild
+    expect(afterRebuild.snap).toBeGreaterThanOrEqual(after.snap);
+    // No longer cleared — a warm entry from A cannot answer a B lookup
+    // because the key carries A's shape id. See the collision test below.
+    expect(afterRebuild.bestShape).toBeGreaterThanOrEqual(after.bestShape);
+  });
+
+  // The actual defect #138 describes: subway and LIRR both use numeric
+  // routeIds ("1".."9"), so with a routeId-keyed cache a warmed LIRR entry
+  // could answer a subway lookup at an overlapping grid cell — Atlantic
+  // Terminal and Penn are the realistic overlaps — and route the train along
+  // the wrong mode's geometry.
+  it("does not let a colliding routeId return the other index's shape", () => {
+    // Same routeId "1", same geographic area (so the grid cell matches),
+    // but different geometry — as subway and LIRR are at Penn/Atlantic.
+    const subwayCoords: [number, number][] = Array.from(
+      { length: 30 },
+      (_, i) => [-73.99 + i * 0.0005, 40.75] as [number, number],
+    );
+    const lirrCoords: [number, number][] = Array.from(
+      { length: 30 },
+      (_, i) => [-73.99 + i * 0.0005, 40.7505] as [number, number],
+    );
+    const subwayRoutes = makeRoutes([{ routeId: "1", coords: subwayCoords }]);
+    const lirrRoutes = makeRoutes([{ routeId: "1", coords: lirrCoords }]);
+
+    const subwayIndex = buildShapeIndex(subwayRoutes);
+    const lirrIndex = buildShapeIndex(lirrRoutes);
+
+    // Warm the LIRR entry first, then query subway at the same position.
+    const probe = subwayCoords[10]!;
+    const lirrPath = findTrackPath(lirrIndex, "1", lirrCoords[5]!, probe);
+    const subwayPath = findTrackPath(subwayIndex, "1", subwayCoords[5]!, probe);
+
+    expect(lirrPath).not.toBeNull();
+    expect(subwayPath).not.toBeNull();
+    // Each must resolve to a shape from its OWN index.
+    expect(subwayIndex["1"].some((s) => s.id === subwayPath!.shape.id)).toBe(true);
+    expect(lirrIndex["1"].some((s) => s.id === lirrPath!.shape.id)).toBe(true);
+    expect(subwayPath!.shape.id).not.toBe(lirrPath!.shape.id);
+  });
+
+  // The specific bypass: on the third call the WeakMap hits and returns
+  // early, so anything guarding inside buildShapeIndex below that line is
+  // skipped. Identity must still be correct after the round trip.
+  it("stays correct across subway -> LIRR -> subway, where the memo short-circuits", () => {
+    const aCoords: [number, number][] = Array.from(
+      { length: 30 },
+      (_, i) => [-73.98 + i * 0.0005, 40.76] as [number, number],
+    );
+    const bCoords: [number, number][] = Array.from(
+      { length: 30 },
+      (_, i) => [-73.98 + i * 0.0005, 40.7605] as [number, number],
+    );
+    const a = makeRoutes([{ routeId: "3", coords: aCoords }]);
+    const b = makeRoutes([{ routeId: "3", coords: bCoords }]);
+
+    const a1 = buildShapeIndex(a);
+
+    // Warm b FIRST, at the same grid cell the final `a` lookup will use.
+    // Order matters: under the old routeId key both share one entry, so
+    // whichever is written first wins. Warming `a` first would let `a`'s own
+    // value satisfy the final assertion and the test would pass even with the
+    // bug present — which is exactly how the first version of this test was
+    // vacuous.
+    const b1 = buildShapeIndex(b);
+    findTrackPath(b1, "3", bCoords[5]!, aCoords[10]!);
+
+    const a2 = buildShapeIndex(a); // memo hit — the old clear never ran here
+
+    expect(a2).toBe(a1);
+    const path = findTrackPath(a2, "3", aCoords[5]!, aCoords[10]!);
+    expect(path).not.toBeNull();
+    expect(a1["3"].some((s) => s.id === path!.shape.id)).toBe(true);
   });
 });

@@ -50,7 +50,22 @@ function cachedBestShape(
   routeId: string,
   pos: [number, number],
 ): { shape: ShapeData | null; tooFar: boolean } {
-  const key = `${routeId}:${Math.round(pos[0] / SNAP_GRID)},${Math.round(pos[1] / SNAP_GRID)}`;
+  // Keyed by shape identity, NOT routeId (#138).
+  //
+  // routeIds collide between subway and LIRR — "1".."9" exist in both — so a
+  // `${routeId}:cell` key let a warmed LIRR entry answer a subway lookup and
+  // route the train along LIRR geometry. Atlantic Terminal and Penn are the
+  // realistic overlaps.
+  //
+  // `shapes[0].id` comes from the global shapeIdCounter, so it is unique per
+  // (index, route) pair and discriminates the two modes without any clearing.
+  // That matters: the previous defence was a `bestShapeCache.clear()` inside
+  // buildShapeIndex, which sat *after* the memo early-return and so was
+  // skipped on exactly the subway -> LIRR -> subway path it was meant to
+  // protect. Keying correctly removes the need for the clear entirely, and
+  // lets both modes stay warm simultaneously — which is what the global
+  // counter was introduced for.
+  const key = `${shapes[0].id}:${Math.round(pos[0] / SNAP_GRID)},${Math.round(pos[1] / SNAP_GRID)}`;
   if (bestShapeCache.has(key)) {
     return { shape: bestShapeCache.get(key)!, tooFar: false };
   }
@@ -110,15 +125,12 @@ export function buildShapeIndex(routes: RoutesGeoJSON): Record<string, ShapeData
   const cached = indexByRoutes.get(routes);
   if (cached) return cached;
 
-  // bestShapeCache values are direct ShapeData references; its keys are
-  // `${routeId}:gridCell`. snapCache values are numeric distances under
-  // globally-unique shapeId keys, so it stays warm across builds. But
-  // routeIds can collide between subway and LIRR (per the documented
-  // numeric-routeId overlap), and a stale ShapeData ref would route a
-  // LIRR train through the matching subway shape's geometry. Clear here
-  // — it'll re-warm naturally as cachedBestShape is exercised.
-  bestShapeCache.clear();
-
+  // No cache clearing here (#138). Both bestShapeCache and snapCache are now
+  // keyed by globally-unique shape ids rather than routeId, so entries from a
+  // different mode's index can never be mistaken for this one's. Clearing was
+  // the old defence against the subway/LIRR routeId overlap, and it was
+  // broken anyway: it sat below the memo early-return above, so it never ran
+  // on the subway -> LIRR -> subway path it existed to protect.
   const index: Record<string, ShapeData[]> = {};
   for (const feature of routes.features) {
     const routeId = feature.properties.routeId;
