@@ -1,5 +1,19 @@
-FROM node:22-slim
-RUN corepack enable && corepack prepare pnpm@10 --activate
+# Pinned by digest, not just tag: a bare `node:22-slim` lets every rebuild
+# silently pull a different base. Dependabot's `docker` ecosystem now tracks
+# this line and will PR digest bumps (see .github/dependabot.yml).
+# Digest is the multi-arch index for 22-slim, so amd64 (Railway) and arm64
+# (local Apple silicon) both resolve.
+FROM node:22-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436
+
+# Corepack caches the activated pnpm release under COREPACK_HOME, which
+# defaults to the *invoking user's* home. Preparing as root and then running
+# as `node` would leave corepack looking in /home/node/.cache and trying to
+# re-download pnpm at container start. Pin it to a shared location and make
+# it world-readable so the unprivileged runtime user finds the same install.
+ENV COREPACK_HOME=/opt/corepack
+RUN corepack enable \
+    && corepack prepare pnpm@10 --activate \
+    && chmod -R a+rX /opt/corepack
 WORKDIR /app
 
 # Install dependencies
@@ -46,6 +60,18 @@ RUN for cmd in "download-gtfs" "download-gtfs:lirr"; do \
 ENV NODE_ENV=production
 ENV PORT=3001
 ENV POLL_INTERVAL_MS=30000
+
+# Drop root for the runtime. Everything above (install, client build, GTFS
+# download) still runs privileged; only the long-lived server process is
+# unprivileged, so any file-write or RCE primitive in the app no longer lands
+# as uid 0.
+#
+# No `chown -R /app` on purpose: it would add a layer duplicating the entire
+# ~300MB dependency tree and the baked GTFS data. The app only ever *reads*
+# from /app at runtime, and root-created files are world-readable by default,
+# so the `node` user needs no ownership transfer. If a future change writes to
+# /app at runtime, that specific path needs its own chown.
+USER node
 
 EXPOSE 3001
 
