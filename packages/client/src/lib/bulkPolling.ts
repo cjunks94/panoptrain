@@ -51,37 +51,102 @@ export function isTransientNoSnapshotError(err: unknown): boolean {
   return msg.startsWith("API 503");
 }
 
+/** Cap on exponential backoff. Long enough to stop hammering a down server,
+ *  short enough that recovery is noticed without a reload. */
+export const MAX_BACKOFF_MS = 5 * 60 * 1000;
+
 export function createBulkPoller<TData>(config: CreateBulkPollerConfig<TData>): BulkPoller {
   const { fetch: fetchFn, initialData, intervalMs, inFlightGuard = false, onState } = config;
 
   let interval: ReturnType<typeof setInterval> | undefined;
   let stopped = false;
   let inFlight = false;
+  // Monotonic request id. `inFlightGuard` prevents overlap only when it is
+  // enabled, and even then a tick can start the moment the previous fetch
+  // settles — so ordering still has to be enforced on the apply side. Without
+  // this an older response can land after a newer one and clobber it, which
+  // shows up as markers jumping backwards (#132).
+  let nextSeq = 0;
+  let lastAppliedSeq = -1;
+  // Consecutive failures, for exponential backoff (#133). Reset on success.
+  let failures = 0;
+  let backoffTimer: ReturnType<typeof setTimeout> | undefined;
   // Track current data so non-503 errors can preserve the last good value
   // — popups stay populated with stale-but-useful data while we surface
   // the error separately. 503 (cold start) resets to initialData.
   let currentData: TData = initialData;
   let currentSource: "live" | "cached" | null = null;
 
+  /** Backoff delay for the Nth consecutive failure: interval * 2^(n-1),
+   *  capped. Returns 0 while healthy so the normal interval is unchanged. */
+  function backoffFor(consecutiveFailures: number): number {
+    if (consecutiveFailures <= 0) return 0;
+    const grown = intervalMs * 2 ** (consecutiveFailures - 1);
+    return Math.min(grown, MAX_BACKOFF_MS);
+  }
+
+  /** After a failure, pause the steady interval and resume it once the
+   *  backoff elapses. Keeps a dead server from being polled at full cadence
+   *  indefinitely, while recovering on its own without a reload. */
+  function scheduleBackoff(): void {
+    if (stopped) return;
+    if (interval) {
+      clearInterval(interval);
+      interval = undefined;
+    }
+    clearTimeout(backoffTimer);
+    backoffTimer = setTimeout(() => {
+      if (stopped) return;
+      // Fire the retry only. Do NOT restore the steady interval here: the
+      // retry may stay pending longer than intervalMs, and with the default
+      // `inFlightGuard: false` that would resume full-cadence requests while
+      // the server is still down — recreating the pileup backoff exists to
+      // prevent. The interval is restored from pollOnce's success path
+      // (resumeSteadyInterval); a failed retry schedules the next backoff.
+      void pollOnce();
+    }, backoffFor(failures));
+  }
+
+  function resumeSteadyInterval(): void {
+    clearTimeout(backoffTimer);
+    backoffTimer = undefined;
+    if (!interval && !stopped) interval = setInterval(() => void pollOnce(), intervalMs);
+  }
+
   async function pollOnce(): Promise<void> {
     if (stopped) return;
     if (inFlightGuard && inFlight) return;
     inFlight = true;
+    const seq = nextSeq++;
     try {
       const res = await fetchFn();
       if (stopped) return;
+      // Drop a response that resolved out of order — a slower earlier
+      // request must never overwrite a newer snapshot.
+      if (seq < lastAppliedSeq) return;
+      lastAppliedSeq = seq;
+      failures = 0;
+      resumeSteadyInterval();
       currentData = res.data;
       currentSource = res.source;
       onState({ data: currentData, source: currentSource, error: null });
     } catch (err) {
       if (stopped) return;
+      if (seq < lastAppliedSeq) return;
+      lastAppliedSeq = seq;
       if (isTransientNoSnapshotError(err)) {
+        // Cold start is expected, not a failure — don't back off, the
+        // server is up and about to have data.
+        failures = 0;
+        resumeSteadyInterval();
         currentData = initialData;
         currentSource = null;
         onState({ data: currentData, source: currentSource, error: null });
       } else {
+        failures++;
         const error = err instanceof Error ? err : new Error(String(err));
         onState({ data: currentData, source: currentSource, error });
+        scheduleBackoff();
       }
     } finally {
       inFlight = false;
@@ -91,6 +156,7 @@ export function createBulkPoller<TData>(config: CreateBulkPollerConfig<TData>): 
   return {
     start() {
       stopped = false;
+      failures = 0;
       void pollOnce();
       interval = setInterval(() => void pollOnce(), intervalMs);
     },
@@ -100,6 +166,8 @@ export function createBulkPoller<TData>(config: CreateBulkPollerConfig<TData>): 
         clearInterval(interval);
         interval = undefined;
       }
+      clearTimeout(backoffTimer);
+      backoffTimer = undefined;
     },
   };
 }

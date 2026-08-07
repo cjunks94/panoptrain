@@ -29,6 +29,11 @@ export function useAircraftPositions(enabled: boolean): UseAircraftPositionsResu
     },
     initialData: INITIAL_AIRCRAFT,
     intervalMs: POLL_INTERVAL,
+    // Highest-cadence endpoint (8s) with the largest volatile payload, so it
+    // is the one most exposed to request pileup on a slow connection. useTafs
+    // already opts in; this was the omission that let older snapshots clobber
+    // newer ones and made planes jump backwards (#132).
+    inFlightGuard: true,
     enabled,
   });
   return { aircraft: data, source, error };
