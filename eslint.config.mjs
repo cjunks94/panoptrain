@@ -2,6 +2,7 @@ import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
+import security from "eslint-plugin-security";
 
 /**
  * Flat config, replacing the old `.eslintrc.cjs` (#144).
@@ -67,6 +68,26 @@ export default tseslint.config(
     rules: {
       "react-hooks/rules-of-hooks": "error",
       "react-hooks/exhaustive-deps": "warn",
+    },
+  },
+
+  // Security linting (#145). Server-side only: these rules target Node APIs
+  // (child_process, fs paths, non-literal regex/require) and produce noise
+  // rather than signal in browser code.
+  {
+    files: ["packages/server/src/**/*.ts", "packages/server/scripts/**/*.ts"],
+    plugins: { security },
+    rules: {
+      ...security.configs.recommended.rules,
+
+      // Flags every dynamic property access (`obj[key]`). This codebase is
+      // built on keyed GTFS lookups — stops[id], distances[shapeId],
+      // trips[tripId] — so it reported 103 hits with no way to distinguish a
+      // safe indexed read from an unsafe one. Left on, it would bury the
+      // handful of findings that matter. Prototype-pollution risk at the one
+      // place it actually applies (a user-supplied key) is handled with an
+      // explicit hasOwnProperty check instead — see routes/plan.ts (#127).
+      "security/detect-object-injection": "off",
     },
   },
 

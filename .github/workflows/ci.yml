@@ -5,6 +5,17 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Weekly sweep (#145). Without this, CVEs published during a quiet week are
+  # never surfaced -- push/PR-only triggers meant the 21 advisories found in
+  # the 2026-08 review had accumulated silently for months.
+  schedule:
+    - cron: "0 13 * * 1" # Mondays 09:00 America/New_York (13:00 UTC)
+
+# Least privilege by default (#145). The workflow previously inherited the
+# repository default token scope, which is often read/write across contents,
+# packages, issues and pull-requests. No job here needs more than read.
+permissions:
+  contents: read
 
 jobs:
   check:
@@ -31,6 +42,10 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Compute GTFS cache week
+        id: gtfsweek
+        run: echo "week=$(date -u +%GW%V)" >> "$GITHUB_OUTPUT"
+
       - name: Cache GTFS static data
         if: matrix.task == 'test:coverage'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -38,12 +53,19 @@ jobs:
           path: |
             packages/server/src/data/gtfs
             packages/server/src/data/gtfs-lirr
-          # BUMP THIS when download-gtfs.ts changes the SHAPE of the emitted
-          # data (a new *.json file, a new field). The restore gate below only
-          # checks stops.json, so a stale cache otherwise satisfies it and the
-          # download is skipped -- leaving the new file absent and failing
-          # tests that depend on it. v4 adds transfers.json (#126).
-          key: gtfs-static-v4-subway-lirr-transfers
+          # BUMP THE VERSION when download-gtfs.ts changes the SHAPE of the
+          # emitted data (a new *.json file, a new field). The restore gate
+          # below only checks stops.json, so a stale cache otherwise satisfies
+          # it and the download is skipped -- leaving the new file absent and
+          # failing tests that depend on it. v4 adds transfers.json (#126).
+          #
+          # The week component rotates the cache so CI stops silently testing
+          # against a months-old GTFS snapshot (#145). Deliberately NO
+          # restore-keys: a prefix fallback would restore last week's data,
+          # the gate below would see stops.json and skip the download, and the
+          # rotation would never actually rotate. Cost is one ~20s download
+          # per job on the first run of each week.
+          key: gtfs-static-v4-${{ steps.gtfsweek.outputs.week }}
 
       - name: Download GTFS data if not cached
         if: matrix.task == 'test:coverage'
@@ -80,18 +102,29 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Compute GTFS cache week
+        id: gtfsweek
+        run: echo "week=$(date -u +%GW%V)" >> "$GITHUB_OUTPUT"
+
       - name: Cache GTFS static data
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             packages/server/src/data/gtfs
             packages/server/src/data/gtfs-lirr
-          # BUMP THIS when download-gtfs.ts changes the SHAPE of the emitted
-          # data (a new *.json file, a new field). The restore gate below only
-          # checks stops.json, so a stale cache otherwise satisfies it and the
-          # download is skipped -- leaving the new file absent and failing
-          # tests that depend on it. v4 adds transfers.json (#126).
-          key: gtfs-static-v4-subway-lirr-transfers
+          # BUMP THE VERSION when download-gtfs.ts changes the SHAPE of the
+          # emitted data (a new *.json file, a new field). The restore gate
+          # below only checks stops.json, so a stale cache otherwise satisfies
+          # it and the download is skipped -- leaving the new file absent and
+          # failing tests that depend on it. v4 adds transfers.json (#126).
+          #
+          # The week component rotates the cache so CI stops silently testing
+          # against a months-old GTFS snapshot (#145). Deliberately NO
+          # restore-keys: a prefix fallback would restore last week's data,
+          # the gate below would see stops.json and skip the download, and the
+          # rotation would never actually rotate. Cost is one ~20s download
+          # per job on the first run of each week.
+          key: gtfs-static-v4-${{ steps.gtfsweek.outputs.week }}
 
       - name: Download GTFS data if not cached
         run: |
@@ -154,3 +187,51 @@ jobs:
           name: playwright-report-shard-${{ matrix.shard }}
           path: packages/e2e/playwright-report/
           retention-days: 7
+
+  security:
+    name: security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history so the secret scan covers every commit, not just the
+          # tip. A secret committed and later removed is still a leak.
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 10
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Blocking gate. `high` rather than `moderate` on purpose: a moderate
+      # advisory with no patch available would block every unrelated PR, and
+      # the weekly full report below still surfaces those.
+      - name: Audit production dependencies
+        run: pnpm audit --prod --audit-level high
+
+      # Non-blocking visibility across every severity and dev deps too. This
+      # is what the Monday cron is for.
+      - name: Full advisory report (informational)
+        if: always()
+        continue-on-error: true
+        run: pnpm audit || true
+
+      # Binary rather than gitleaks-action: the action wrapper writes PR
+      # comments, which fails on Dependabot PRs because their GITHUB_TOKEN is
+      # read-only ("Resource not accessible by integration"). Running the
+      # binary sidesteps that entirely and needs no token.
+      - name: Install gitleaks
+        run: |
+          version=8.30.0
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${version}/gitleaks_${version}_linux_x64.tar.gz" \
+            | tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+
+      - name: Scan for committed secrets
+        run: gitleaks detect --source . --redact --verbose --exit-code 1
