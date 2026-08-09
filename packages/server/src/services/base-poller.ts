@@ -190,13 +190,13 @@ export function createSnapshotPoller<T>(config: SnapshotPollerConfig<T>): Snapsh
   let cached: { snapshot: T; cachedAt: number } | null = null;
   let interval: ReturnType<typeof setInterval> | undefined;
   let abortController: AbortController | null = null;
-  // Per-poll token rather than a bare boolean. A boolean has no owner: after
+  // Per-poll id rather than a bare boolean. A boolean has no owner: after
   // stop() releases it and a new poll starts, the *abandoned* poll's finally
   // would clear the guard while the new one is still running, letting the
   // next tick overlap and restoring exactly the defect this guard removes.
   // Only the poll that currently owns the slot may release it.
   let pollSeq = 0;
-  let activeToken: number | null = null;
+  let activePollId: number | null = null;
 
   async function pollOnce(): Promise<void> {
     // Skip rather than overlap (#140). Worst-case airspace poll is ~17s
@@ -209,12 +209,12 @@ export function createSnapshotPoller<T>(config: SnapshotPollerConfig<T>): Snapsh
     //     and then stamp it with a fresh cachedAt — serving stale data as live
     //   - double the request rate against the upstream exactly during an
     //     incident, contradicting this poller's own rate-limit etiquette
-    if (activeToken !== null) {
+    if (activePollId !== null) {
       logger.warn("poll skipped, previous still in flight", { poller: name });
       return;
     }
-    const token = ++pollSeq;
-    activeToken = token;
+    const pollId = ++pollSeq;
+    activePollId = pollId;
 
     abortController = new AbortController();
     const signal = abortController.signal;
@@ -243,7 +243,7 @@ export function createSnapshotPoller<T>(config: SnapshotPollerConfig<T>): Snapsh
     } finally {
       // Only release if we still own the slot — an abandoned poll settling
       // after stop()/restart must not unblock the poll that replaced it.
-      if (activeToken === token) activeToken = null;
+      if (activePollId === pollId) activePollId = null;
     }
   }
 
@@ -263,7 +263,7 @@ export function createSnapshotPoller<T>(config: SnapshotPollerConfig<T>): Snapsh
       // subsequent start() must not be blocked by its pending rejection.
       // The abandoned poll's finally is now a no-op, since it no longer
       // owns the token.
-      activeToken = null;
+      activePollId = null;
     },
     pollOnce,
     getCurrent: () => snapshot,
