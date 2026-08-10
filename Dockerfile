@@ -3,7 +3,7 @@
 # this line and will PR digest bumps (see .github/dependabot.yml).
 # Digest is the multi-arch index for 22-slim, so amd64 (Railway) and arm64
 # (local Apple silicon) both resolve.
-FROM node:22-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436
+FROM node:26-slim@sha256:4ebb5ace66f15a24c14c492e01a8beeed4fddf970a856109f5126e703e5fe503
 
 # Corepack caches the activated pnpm release under COREPACK_HOME, which
 # defaults to the *invoking user's* home. Preparing as root and then running
