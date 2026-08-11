@@ -2,10 +2,11 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { compress } from "hono/compress";
 import { cors } from "hono/cors";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parsePositiveInt } from "./lib/config.js";
+import { resolveStaticPath } from "./lib/static-path.js";
 import { loadStaticGtfs } from "./services/gtfs-loader.js";
 import { startPolling, stopPolling } from "./services/mta-poller.js";
 import { startAirspacePolling, stopAirspacePolling } from "./services/airspace-poller.js";
@@ -95,12 +96,19 @@ if (existsSync(join(clientDist, "index.html"))) {
   };
 
   app.get("*", (c) => {
-    // Try to serve the static file
-    const filePath = join(clientDist, c.req.path);
-    if (existsSync(filePath) && statSync(filePath).isFile()) {
+    // Containment is enforced in resolveStaticPath, not here (#135). Anything
+    // that escapes the root — lexically, via symlink, or via a null byte —
+    // comes back null and falls through to the SPA response, which is also
+    // what a genuine 404 does. That keeps traversal probes indistinguishable
+    // from ordinary misses.
+    const filePath = resolveStaticPath(clientDist, c.req.path);
+    if (filePath) {
       const ext = extname(filePath);
       const mime = mimeTypes[ext] ?? "application/octet-stream";
       c.header("Content-Type", mime);
+      // Unknown extensions fall back to application/octet-stream, which is
+      // MIME-sniffable; say so explicitly.
+      c.header("X-Content-Type-Options", "nosniff");
       c.header("Cache-Control", ext === ".html" ? "no-cache" : "public, max-age=31536000, immutable");
       return c.body(readFileSync(filePath));
     }
