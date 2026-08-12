@@ -2,6 +2,8 @@
 
 Real-time NYC subway train tracker. Polls MTA GTFS-RT feeds, interpolates train positions along route shapes, and renders them on an interactive map.
 
+**Live demo: [panoptrain.cjunker.dev](https://panoptrain.cjunker.dev/)** — subway, LIRR, and a live aircraft overlay, no install or API key needed.
+
 ## Prerequisites
 
 - Node.js >= 20
