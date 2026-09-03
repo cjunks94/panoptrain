@@ -140,6 +140,21 @@ function findFeatureById(
   return { pos: [c[0], c[1]], bearing };
 }
 
+/** Aircraft variant of findFeatureById — keyed on `hex` and using `track`
+ *  for the heading (aircraft features expose `track` rather than `bearing`,
+ *  see useAircraftFeatures). Same FeatureSnapshot shape so the shared
+ *  positionPopupOverlay helper works for both train and aircraft popups. */
+function findAircraftFeatureByHex(
+  features: GeoJSON.Feature[],
+  hex: string,
+): FeatureSnapshot | null {
+  const f = features.find((feat) => feat.properties?.hex === hex);
+  if (!f || f.geometry.type !== "Point") return null;
+  const c = f.geometry.coordinates;
+  const bearing = typeof f.properties?.track === "number" ? f.properties.track : 0;
+  return { pos: [c[0], c[1]], bearing };
+}
+
 /** Position the popup overlay div directly via DOM (no React render). Each
  *  RAF frame:
  *   1. projects the train's lng/lat to screen pixels
@@ -257,6 +272,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
   const setPopupAirportIata = onPopupAirportIataChange;
   const mapRef = useRef<MapRef>(null);
   const popupOverlayRef = useRef<HTMLDivElement>(null);
+  const aircraftPopupOverlayRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
   const viewportHeight = useViewportHeight();
 
@@ -275,6 +291,14 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
   useEffect(() => {
     popupTripIdRef.current = popupTripId;
   }, [popupTripId]);
+
+  // Same stable-closure pattern for the aircraft popup — kept in sync with
+  // the React state so the RAF loop can read the latest hex without
+  // re-binding the animation effect on every open/close.
+  const popupAircraftHexRef = useRef<string | null>(null);
+  useEffect(() => {
+    popupAircraftHexRef.current = popupAircraftHex;
+  }, [popupAircraftHex]);
 
   // fitBounds padding compensates for whichever piece of UI covers the map.
   // The mobile bottom-sheet padding is computed from the live viewport
@@ -355,6 +379,21 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
           if (aircraftSource && "setData" in aircraftSource) {
             (aircraftSource as { setData: (data: GeoJSON.FeatureCollection) => void }).setData(aircraftGeojsonRef.current);
           }
+          // Reposition the aircraft popup overlay against the freshly
+          // interpolated feature position. Mirrors the train-popup
+          // pattern above so the popup tracks the dead-reckoned marker
+          // instead of lagging up to ~1.5s during snap-back.
+          if (map) {
+            const popupHex = popupAircraftHexRef.current;
+            if (popupHex && aircraftPopupOverlayRef.current) {
+              const f = findAircraftFeatureByHex(
+                aircraftGeojsonRef.current.features,
+                popupHex,
+              );
+              if (f) positionPopupOverlay(aircraftPopupOverlayRef.current, map, f);
+              else aircraftPopupOverlayRef.current.style.display = "none";
+            }
+          }
         }
       }
       rafId = requestAnimationFrame(animate);
@@ -393,11 +432,24 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     if (!map) return;
     const reposition = () => {
       const popupId = popupTripIdRef.current;
-      if (!popupId || !popupOverlayRef.current) return;
-      const f = findFeatureById(geojsonRef.current.features, popupId);
-      if (f) positionPopupOverlay(popupOverlayRef.current, map, f);
-      else popupOverlayRef.current.style.display = "none";
+      if (popupId && popupOverlayRef.current) {
+        const f = findFeatureById(geojsonRef.current.features, popupId);
+        if (f) positionPopupOverlay(popupOverlayRef.current, map, f);
+        else popupOverlayRef.current.style.display = "none";
+      }
+      const popupHex = popupAircraftHexRef.current;
+      if (popupHex && aircraftPopupOverlayRef.current) {
+        const f = findAircraftFeatureByHex(aircraftGeojsonRef.current.features, popupHex);
+        if (f) positionPopupOverlay(aircraftPopupOverlayRef.current, map, f);
+        else aircraftPopupOverlayRef.current.style.display = "none";
+      }
     };
+    // Call once on mount and on every popup-open: without this the popup
+    // sits at its initial off-screen transform until either the user moves
+    // the map or interpolateFrame next reports dirty. For a parked aircraft
+    // (no interpolation tick) or a stopped-at train that doesn't move, that
+    // can mean the popup never appears at all until interaction.
+    reposition();
     map.on("move", reposition);
     return () => {
       map.off("move", reposition);
@@ -412,7 +464,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     //
     // iconsReady flips true in onLoad, i.e. once the map genuinely exists,
     // so it is the correct re-run trigger.
-  }, [geojsonRef, iconsReady]);
+  }, [geojsonRef, aircraftGeojsonRef, iconsReady, popupTripId, popupAircraftHex]);
 
   // If the followed train falls out of the snapshot (5min stale eviction,
   // route filter, mode switch), clear follow so the camera doesn't lock to
@@ -1420,17 +1472,6 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
       </Source>
       )}
 
-      {/* Aircraft popup uses react-map-gl's Popup which auto-positions
-          relative to the given lng/lat — much simpler than the train
-          popup's per-frame DOM dance, and aircraft don't need follow
-          mode or sub-poll motion smoothing anyway. */}
-      {popupAircraft && (
-        <AircraftPopup
-          aircraft={popupAircraft}
-          onClose={() => setPopupAircraftHex(null)}
-        />
-      )}
-
       {/* Airport briefing popup — desktop only. On mobile the briefing
           renders inline at the top of AirportDirectory inside the panel
           so it doesn't fight the bottom sheet for screen real estate. */}
@@ -1452,10 +1493,13 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
       )}
 
     </Map>
-    {/* Popup is a sibling of <Map>, not a child — it's a custom HTML
-        overlay (not react-map-gl's Popup) so we can update its position
-        per-frame via direct DOM mutation in the RAF loop without React
-        re-rendering the popup contents 30 times per second. */}
+    {/* Train and aircraft popups are siblings of <Map>, not children —
+        they're custom HTML overlays (not react-map-gl's Popup) so we can
+        update their positions per-frame via direct DOM mutation in the
+        RAF loop. Train popup tracks the train's interpolated marker;
+        aircraft popup tracks the dead-reckoned aircraft marker (was
+        previously lagging up to ~1.5s during snap-back when it lived
+        inside <Map> as a react-map-gl Popup re-rendering only per poll). */}
     {popupTrain && (
       <TrainPopup
         ref={popupOverlayRef}
@@ -1471,6 +1515,13 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
         onToggleFollow={() =>
           setFollowTripId(followTripId === popupTrain.tripId ? null : popupTrain.tripId)
         }
+      />
+    )}
+    {popupAircraft && (
+      <AircraftPopup
+        ref={aircraftPopupOverlayRef}
+        aircraft={popupAircraft}
+        onClose={() => setPopupAircraftHex(null)}
       />
     )}
     </>
