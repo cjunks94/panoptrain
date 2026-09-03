@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import Map, { Source, Layer } from "react-map-gl/maplibre";
 import type { MapLayerMouseEvent, MapRef } from "react-map-gl/maplibre";
+import type { Map as MaplibreMap } from "maplibre-gl";
 import type {
   Aircraft,
   MetarReport,
@@ -168,7 +169,7 @@ function findAircraftFeatureByHex(
  *  doesn't pop out abruptly when a train is half-off the edge. */
 function positionPopupOverlay(
   el: HTMLDivElement,
-  map: maplibregl.Map,
+  map: MaplibreMap,
   feature: FeatureSnapshot,
 ): void {
   const trainScreen = map.project(feature.pos);
