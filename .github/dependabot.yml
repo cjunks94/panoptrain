@@ -21,11 +21,14 @@ updates:
           - "patch"
           - "minor"
     ignore:
-      # @types/node is held to the major version of our runtime Node.
-      # Runtime is Node 22 (see Dockerfile); types ahead of runtime risk
-      # silently typing Node 23+ stdlib APIs that crash on Node 22. CI
-      # runs on Node 22 too, but coverage-gap paths could slip through.
-      # Re-evaluate this cap when bumping the Dockerfile node base image.
+      # Block further @types/node major bumps. The runtime is Node 22
+      # (Dockerfile and CI), but @types/node is already at 26: #78 bumped
+      # it 22 -> 26 and was merged the same day #94 added this cap, so the
+      # cap only holds the gap where it is rather than closing it. Types
+      # ahead of runtime can silently type Node 23+ stdlib APIs that throw
+      # on Node 22; typecheck and CI won't catch a call on a path tests
+      # miss. To close the gap either pin @types/node back to ^22 or bump
+      # the Dockerfile/CI runtime to match, then re-evaluate this cap.
       - dependency-name: "@types/node"
         update-types:
           - "version-update:semver-major"
