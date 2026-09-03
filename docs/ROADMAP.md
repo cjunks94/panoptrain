@@ -14,8 +14,10 @@ Enhancement ideas that never had ticket IDs live in [BACKLOG.md](../BACKLOG.md).
 | 2 — Station clarity | PT-201, PT-202, PT-203, PT-205 | — | PT-204 |
 | 3 — Trip planner | PT-301…PT-305, PT-309 | — | PT-306, PT-307, PT-308 |
 | 4 — Mobile-first | PT-402, PT-404, PT-407 | PT-401, PT-406 | PT-403, PT-405 |
-| 5 — Multi-mode (LIRR) | PT-501…PT-504, PT-506, PT-507 | PT-505 | PT-509, PT-510 (PT-508 🔁) |
-| Airspace overlay (ex-PT-601) | ✅ v1 shipped | see BACKLOG "Airspace v2" | — |
+| 5 — Multi-mode (LIRR) | PT-501…PT-504, PT-506, PT-507 | PT-505 | PT-509, PT-510 |
+| Airspace mode (ex-PT-601) | ✅ v1 shipped | see BACKLOG "Airspace v2" | — |
+
+PT-508 🔁 is superseded (see [Superseded](#superseded)) and is not remaining work.
 
 ## Shipped
 
@@ -64,10 +66,11 @@ One line each; see git history for the PRs.
   MTA colors.
 - **PT-507** — Auto-fit viewport on mode switch, bbox derived from loaded shapes rather
   than hardcoded.
-- **Airspace overlay** (BACKLOG's ex-PT-601) — adsb.lol poller + `/api/airspace/*` with
-  METAR/TAF, smoothed client markers, aircraft/airport popups, airport directory +
-  briefing panels, ODbL attribution. Deviations from the original spec are tracked in
-  BACKLOG "Airspace v2".
+- **Airspace mode** (BACKLOG's ex-PT-601) — shipped as a third mutually-exclusive mode tab
+  (Subway | LIRR | Airspace), not co-rendered with transit. adsb.lol poller +
+  `/api/airspace/*` with METAR/TAF, smoothed client markers, aircraft/airport popups,
+  airport directory + briefing panels, ODbL attribution. Deviations from the original spec
+  (including the spec'd independent overlay toggle) are tracked in BACKLOG "Airspace v2".
 
 ## Remaining work
 

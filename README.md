@@ -1,8 +1,8 @@
 # Panoptrain
 
-Real-time NYC transit tracker. Polls MTA GTFS-RT feeds, interpolates train positions along route shapes, and renders them on an interactive map — subway and LIRR as switchable modes, a trip planner with alternative routes and live delay context, and a live aircraft overlay above Manhattan (adsb.lol) with airport weather briefings.
+Real-time NYC transit tracker. Polls MTA GTFS-RT feeds, interpolates train positions along route shapes, and renders them on an interactive map — subway and LIRR as switchable modes, a trip planner with alternative routes and live delay context, and a live aircraft/airspace mode above Manhattan (adsb.lol) with airport weather briefings.
 
-**Live demo: [panoptrain.cjunker.dev](https://panoptrain.cjunker.dev/)** — subway, LIRR, and a live aircraft overlay, no install or API key needed.
+**Live demo: [panoptrain.cjunker.dev](https://panoptrain.cjunker.dev/)** — subway, LIRR, and a live airspace mode, no install or API key needed.
 
 ## Prerequisites
 
@@ -63,7 +63,8 @@ packages/
 | `GET /api/plan?from=X&to=Y` | Subway trip plan (Dijkstra + alternatives, live delay ranges) |
 | `GET /api/plan/lirr?from=X&to=Y&at=…` | LIRR schedule-based trip plan (direct + one-transfer) |
 | `GET /api/airspace/aircraft` | Live aircraft positions over NYC (adsb.lol) |
-| `GET /api/airspace/metar` / `taf` | Airport weather (METAR/TAF) |
+| `GET /api/airspace/metar` | Airport weather observations (METAR) |
+| `GET /api/airspace/taf` | Airport weather forecasts (TAF) |
 | `GET /api/health` | Health check |
 | `GET /api/trains` etc. | Legacy aliases for the subway endpoints (kept for back-compat) |
 
@@ -72,5 +73,5 @@ packages/
 Tracked in [docs/ROADMAP.md](docs/ROADMAP.md), audited against `main` on 2026-08-12. Most of
 the original five epics have shipped — unified polling config, station clarity, the
 multi-route trip planner with delay ranges, the mobile bottom sheet, LIRR as a second mode,
-and the aircraft/airspace overlay. What's still open (with honest partial-status notes) lives
+and the aircraft/airspace mode. What's still open (with honest partial-status notes) lives
 there; looser enhancement ideas are in [BACKLOG.md](BACKLOG.md).
