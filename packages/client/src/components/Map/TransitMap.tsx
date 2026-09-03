@@ -904,14 +904,17 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     // eslint-disable-next-line react-hooks/exhaustive-deps -- layout values read via closure; refly only on token change
   }, [flyToToken]);
 
-  // Close train-only state when entering the airspace tab, and the
+  // Close transit-only state when entering the airspace tab, and the
   // airport popup when leaving it. Without the airspace clear the RAF
   // loop would keep recentering on a followed train (whose layer has
-  // unmounted), and a stale train popup would float over empty space.
+  // unmounted), and a stale train or station popup would float over
+  // empty space (StopPopup renders from popupStopId + stops, neither of
+  // which is mode-gated).
   useEffect(() => {
     if (mode === null) {
       setFollowTripId(null);
       setPopupTripId(null);
+      setPopupStopId(null);
       return;
     }
     if (popupAirportIata) setPopupAirportIata(null);
