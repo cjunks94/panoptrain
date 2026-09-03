@@ -121,6 +121,50 @@ function createPlaneIcon(size: number): ImageData {
   return ctx.getImageData(0, 0, size, size);
 }
 
+/** Heading step (degrees) between pre-rotated caret images. 36 images at
+ *  10° is plenty for a 6px glyph and keeps the sprite atlas small. */
+const CARET_STEP_DEG = 10;
+
+/** Name of the pre-rotated caret image for a heading. Rounds to the
+ *  nearest CARET_STEP_DEG and wraps so 355° -> "marker-caret-0". */
+function caretImageId(deg: number): string {
+  const steps = 360 / CARET_STEP_DEG;
+  const i = ((Math.round(deg / CARET_STEP_DEG) % steps) + steps) % steps;
+  return `marker-caret-${i * CARET_STEP_DEG}`;
+}
+
+/** Generate a direction caret as SDF ImageData: a small triangle drawn just
+ *  outside the bullet's rim, pointing along `deg` (0 = north, clockwise),
+ *  on a canvas whose center coincides with the bullet's center. The
+ *  rotation is baked into the image rather than applied via icon-rotate
+ *  because icon-offset rotates together with icon-rotate, which would
+ *  swing clustered trains' fan-out offset off their bullet. With the
+ *  heading baked in, the caret layer can reuse the bullet layer's exact
+ *  unrotated icon-offset and stay glued to its bullet.
+ *
+ *  Sized for icon-size 0.5 alongside the 48px bullets at the same scale:
+ *  the bullet's rim is at r=24 canvas px, the caret spans r=26..38. */
+function createCaretIcon(size: number, deg: number): ImageData {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+  const c = size / 2;
+  const rBase = size * 0.34;   // 26 @ 76
+  const rTip = size * 0.5 - 1; // 37 @ 76
+  const halfW = size * 0.09;   // ~7 @ 76
+  ctx.translate(c, c);
+  ctx.rotate((deg * Math.PI) / 180);
+  ctx.fillStyle = "#fff";
+  ctx.beginPath();
+  ctx.moveTo(0, -rTip);
+  ctx.lineTo(halfW, -rBase);
+  ctx.lineTo(-halfW, -rBase);
+  ctx.closePath();
+  ctx.fill();
+  return ctx.getImageData(0, 0, size, size);
+}
+
 interface FeatureSnapshot {
   pos: [number, number];
   /** Geographic bearing in degrees (0=N, 90=E, 180=S, 270=W). Stored on
@@ -494,6 +538,12 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
     map.addImage("marker-circle", createCircleIcon(size), { sdf: true });
     map.addImage("marker-square", createSquareIcon(size), { sdf: true });
     map.addImage("marker-plane", createPlaneIcon(size), { sdf: true });
+    // Direction carets, one image per CARET_STEP_DEG heading. 76px canvas
+    // (vs 48 for bullets) so the caret clears the bullet rim at the same
+    // icon-size; see createCaretIcon for why rotation is baked in.
+    for (let deg = 0; deg < 360; deg += CARET_STEP_DEG) {
+      map.addImage(caretImageId(deg), createCaretIcon(76, deg), { sdf: true });
+    }
     setIconsReady(true);
   }, []);
 
@@ -1462,29 +1512,45 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
             }}
           />
         )}
-        {/* Direction carets — rotated by actual bearing along the track */}
-        <Layer
-          id="train-carets"
-          type="symbol"
-          layout={{
-            "text-field": "▲",
-            "text-size": 10,
-            "text-offset": [
-              "interpolate", ["linear"], ["get", "clusterOffset"],
-              -3, ["literal", [-7.8, -1.5]],
-              0, ["literal", [0, -1.5]],
-              3, ["literal", [7.8, -1.5]],
-            ],
-            "text-rotate": ["get", "bearing"],
-            "text-rotation-alignment": "map",
-            "text-allow-overlap": true,
-            "text-ignore-placement": true,
-          }}
-          paint={{
-            "text-color": "#ffffff",
-            "text-opacity": ["*", 0.85, ["get", "opacity"]],
-          }}
-        />
+        {/* Direction carets — a small triangle riding the bullet's rim on the
+            side the train is heading. Rendered from pre-rotated SDF images
+            (see createCaretIcon) rather than a "▲" text glyph: CARTO's
+            glyph server has no U+25B2 in the Open Sans stacks (its
+            9472-9727 range holds a single glyph, U+25CA), so the previous
+            text-field caret never drew a single pixel (#183). Image choice
+            is data-driven from `bearing` rounded to CARET_STEP_DEG, and the
+            icon-offset mirrors train-markers exactly so clustered fan-out
+            keeps caret and bullet together. */}
+        {iconsReady && (
+          <Layer
+            id="train-carets"
+            type="symbol"
+            layout={{
+              "icon-image": [
+                "concat",
+                "marker-caret-",
+                ["to-string", [
+                  "*", CARET_STEP_DEG,
+                  ["%", ["+", ["round", ["/", ["get", "bearing"], CARET_STEP_DEG]], 360 / CARET_STEP_DEG], 360 / CARET_STEP_DEG],
+                ]],
+              ],
+              "icon-size": 0.5,
+              "icon-rotation-alignment": "map",
+              "icon-allow-overlap": true,
+              "icon-ignore-placement": true,
+              "icon-offset": [
+                "interpolate", ["linear"], ["get", "clusterOffset"],
+                -3, ["literal", [-156, 0]],
+                0, ["literal", [0, 0]],
+                3, ["literal", [156, 0]],
+              ],
+            }}
+            paint={{
+              "icon-color": "#ffffff",
+              "icon-opacity": ["*", 0.85, ["get", "opacity"]],
+            }}
+          />
+        )}
       </Source>
       )}
 
