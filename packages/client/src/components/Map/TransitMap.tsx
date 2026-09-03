@@ -333,6 +333,18 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
   // intentional: we already have a 15fps interpolated position and panTo's
   // own ease curve would fight that, producing visible stutter.
   useEffect(() => {
+    // Hold the per-frame setData loop until the map has fired `load`
+    // (iconsReady flips in handleMapLoad). maplibre >= 5 reports a GeoJSON
+    // source as not-loaded while a setData round-trip to the worker is in
+    // flight, and Map.loaded() — which gates the one-shot `load` event at
+    // the end of each render frame — requires every source to be loaded.
+    // Uploading the trains GeoJSON every frame from t=0 therefore kept the
+    // map perpetually "loading" under maplibre 6: `load` never fired,
+    // handleMapLoad never ran, and every layer gated on iconsReady (train
+    // markers, rim, carets, aircraft) never mounted. Nothing here is useful
+    // before those layers exist, so starting late costs nothing.
+    if (!iconsReady) return;
+
     let rafId = 0;
     let lastFrame = 0;
 
@@ -402,7 +414,7 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
 
     rafId = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(rafId);
-  }, [geojsonRef, interpolateFrame, aircraftGeojsonRef, interpolateAircraftFrame]);
+  }, [geojsonRef, interpolateFrame, aircraftGeojsonRef, interpolateAircraftFrame, iconsReady]);
 
   // User dragging the map breaks follow. dragstart fires only on user input,
   // not on programmatic setCenter, so we don't have to debounce or filter.
