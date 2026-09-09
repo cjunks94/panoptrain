@@ -594,3 +594,138 @@ describe("estimateVehicle walk-forward past arriveNext", () => {
     expect(trains[0].lastObservedAt).toBeNull();
   });
 });
+
+/**
+ * #142 — `findBestShape` used to return the first shape serving the train's
+ * current stop, which on short-turning routes is an arbitrary pattern: every
+ * northbound 1 south of 137 St carried one fixed headsign out of three.
+ * The MTA realtime tripId suffix (`064750_1..N16R` → `1..N16R`) is the
+ * static shapeId, so the trip's own pattern is tried first.
+ */
+describe("findBestShape prefers the trip's own pattern (#142)", () => {
+  // Two northbound patterns on route 1 sharing S1→S3; the full-length
+  // pattern continues to S4. Trips are declared full-length first so the
+  // stop-based pass would always pick it (the bug).
+  function makeGtfs(): StaticGtfsData {
+    const coords: [number, number][] = [
+      [-73.99, 40.75],
+      [-73.99, 40.77],
+      [-73.99, 40.79],
+      [-73.99, 40.81],
+    ];
+    return {
+      stops: {
+        S1: { stopId: "S1", stopName: "S1", lat: 40.75, lon: -73.99, parentStation: null },
+        S2: { stopId: "S2", stopName: "S2", lat: 40.77, lon: -73.99, parentStation: null },
+        S3: { stopId: "S3", stopName: "137 St", lat: 40.79, lon: -73.99, parentStation: null },
+        S4: { stopId: "S4", stopName: "242 St", lat: 40.81, lon: -73.99, parentStation: null },
+        X1: { stopId: "X1", stopName: "Other line", lat: 40.77, lon: -73.95, parentStation: null },
+      },
+      routes: {
+        "1": { routeId: "1", shortName: "1", longName: "1", color: "000", textColor: "FFF" },
+        "A": { routeId: "A", shortName: "A", longName: "A", color: "00F", textColor: "FFF" },
+      },
+      shapes: {
+        "1..N03R": { shapeId: "1..N03R", coordinates: coords },
+        "1..N16R": { shapeId: "1..N16R", coordinates: coords.slice(0, 3) },
+        "A..N01R": { shapeId: "A..N01R", coordinates: [[-73.95, 40.75], [-73.95, 40.79]] },
+      },
+      trips: {
+        "static-full": { tripId: "static-full", routeId: "1", shapeId: "1..N03R", directionId: 0, tripHeadsign: "Van Cortlandt Park-242 St" },
+        "static-short": { tripId: "static-short", routeId: "1", shapeId: "1..N16R", directionId: 0, tripHeadsign: "137 St-City College" },
+        "static-a": { tripId: "static-a", routeId: "A", shapeId: "A..N01R", directionId: 0, tripHeadsign: "Inwood-207 St" },
+        // LIRR-style: realtime tripId equals the static tripId outright.
+        "GO506_26_1234": { tripId: "GO506_26_1234", routeId: "1", shapeId: "1..N16R", directionId: 0, tripHeadsign: "137 St-City College" },
+      },
+      stopSequences: {
+        "1-0-1..N03R": [
+          { stopId: "S1", stopSequence: 1 },
+          { stopId: "S2", stopSequence: 2 },
+          { stopId: "S3", stopSequence: 3 },
+          { stopId: "S4", stopSequence: 4 },
+        ],
+        "1-0-1..N16R": [
+          { stopId: "S1", stopSequence: 1 },
+          { stopId: "S2", stopSequence: 2 },
+          { stopId: "S3", stopSequence: 3 },
+        ],
+        "A-0-A..N01R": [
+          { stopId: "X1", stopSequence: 1 },
+        ],
+      },
+      stopDistances: {
+        "1..N03R": { S1: 0, S2: 2.2, S3: 4.4, S4: 6.6 },
+        "1..N16R": { S1: 0, S2: 2.2, S3: 4.4 },
+        "A..N01R": { X1: 0 },
+      },
+      transfers: [],
+    };
+  }
+
+  function vehicle(tripId: string, currentStopId: string, routeId = "1"): ParsedVehicle {
+    return {
+      tripId,
+      routeId,
+      directionId: 0,
+      currentStopSequence: 2,
+      currentStopId,
+      currentStatus: "IN_TRANSIT_TO",
+      timestamp: Math.floor(Date.now() / 1000) - 10,
+    };
+  }
+
+  it("labels a short-turn trip with the short-turn terminus", () => {
+    const [t] = interpolatePositions([vehicle("127400_1..N16R", "S2")], [], makeGtfs());
+    expect(t.destination).toBe("137 St-City College");
+  });
+
+  it("labels a full-length trip with the full-length terminus", () => {
+    const [t] = interpolatePositions([vehicle("127850_1..N03R", "S2")], [], makeGtfs());
+    expect(t.destination).toBe("Van Cortlandt Park-242 St");
+  });
+
+  it("uses the static trip's shape when the realtime tripId matches it directly (LIRR style)", () => {
+    const [t] = interpolatePositions([vehicle("GO506_26_1234", "S2")], [], makeGtfs());
+    expect(t.destination).toBe("137 St-City College");
+  });
+
+  it("falls back to the stop-based match when the pattern shape does not serve the current stop", () => {
+    // A rerouted train: tripId says pattern 1..N16R, but it is reporting a
+    // stop only the full-length pattern serves. Trust the stop, as before.
+    const [t] = interpolatePositions([vehicle("127400_1..N16R", "S4")], [], makeGtfs());
+    expect(t.destination).toBe("Van Cortlandt Park-242 St");
+    // Positioned on the full-length shape past S3 (mid-leg S3→S4), which the
+    // short-turn geometry could not produce.
+    expect(t.latitude).toBeGreaterThan(40.79);
+  });
+
+  it("falls back when the tripId suffix is not a known shape", () => {
+    // Some feeds emit bare suffixes like `128300_2..S`; nothing to match.
+    const [t] = interpolatePositions([vehicle("128300_1..N", "S2")], [], makeGtfs());
+    expect(t.destination).toBe("Van Cortlandt Park-242 St");
+  });
+
+  it("does not let a pattern from another route override the route+direction key", () => {
+    // Suffix names an A-train shape but the vehicle says route 1: the pattern
+    // must be looked up under the vehicle's own route+direction.
+    const [t] = interpolatePositions([vehicle("100000_A..N01R", "S2")], [], makeGtfs());
+    expect(t.routeId).toBe("1");
+    expect(t.destination).toBe("Van Cortlandt Park-242 St");
+  });
+
+  it("applies the same pattern lookup to trip-update-only positions", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const tu: ParsedTripUpdate = {
+      tripId: "127400_1..N16R",
+      routeId: "1",
+      directionId: 0,
+      stopTimeUpdates: [
+        { stopId: "S1", stopSequence: 1, arrival: { time: now - 120, delay: 0 }, departure: { time: now - 90, delay: 0 } },
+        { stopId: "S2", stopSequence: 2, arrival: { time: now + 60, delay: 0 }, departure: { time: now + 90, delay: 0 } },
+        { stopId: "S3", stopSequence: 3, arrival: { time: now + 200, delay: 0 }, departure: null },
+      ],
+    };
+    const [t] = interpolatePositions([], [tu], makeGtfs());
+    expect(t.destination).toBe("137 St-City College");
+  });
+});
