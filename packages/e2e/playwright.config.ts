@@ -60,6 +60,15 @@ export const shared = defineConfig({
     {
       name: "mobile-chrome",
       use: { ...devices["Pixel 7"] },
+      // map.spec.ts drives three full WebGL map loads per project. On the
+      // Pixel 7 profile (deviceScaleFactor 2.625) that is a ~7x larger
+      // canvas through SwiftShader, and on 2-vCPU CI runners it starved the
+      // main thread enough that unrelated panel clicks in smoke/mobile
+      // specs hung past their 30s timeout (3 runs on 2026-09-09, all
+      // mobile-chrome, all "done scrolling" then silence). The map
+      // assertions are engine-level, not viewport-level: chromium already
+      // covers Blink and mobile-safari covers WebKit, so nothing is lost.
+      testIgnore: /map\.spec\.ts/,
     },
     {
       name: "mobile-safari",
