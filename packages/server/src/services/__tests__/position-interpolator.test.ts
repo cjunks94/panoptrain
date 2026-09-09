@@ -288,6 +288,27 @@ describe("estimateFromTripUpdate next-stop semantics", () => {
     expect(t.nextStopName).toBe("End");
   });
 
+  it("uses the departure time when an arrival event carries no time (#139)", () => {
+    // A delay-only arrival parses to `time: null`. The fallback chain must
+    // then read the departure time, so a train still approaching S2 stays
+    // IN_TRANSIT_TO S2. Had the parser emitted `time: 0`, findCurrentLeg
+    // would have seen arrival <= now and called the train dwelling at S2.
+    const now = Math.floor(Date.now() / 1000);
+    const tu = tripUpdate([
+      { stopId: "S1", arriveAt: now - 240, departAt: now - 210 },
+      { stopId: "S2", arriveAt: now + 60 },
+      { stopId: "S3", arriveAt: now + 180 },
+    ]);
+    tu.stopTimeUpdates[1].arrival = { time: null, delay: 30 };
+    tu.stopTimeUpdates[1].departure = { time: now + 90, delay: 30 };
+
+    const trains = interpolatePositions([], [tu], makeGtfs());
+
+    expect(trains).toHaveLength(1);
+    expect(trains[0].status).toBe("IN_TRANSIT_TO");
+    expect(trains[0].currentStopId).toBe("S2");
+  });
+
   it("treats an origin departure-only stop as STOPPED_AT at the origin", () => {
     // Origin STUs in some feeds carry only a departure time (no arrival).
     // Pre-fix, arrival?.time ?? 0 made the loop classify the train as having

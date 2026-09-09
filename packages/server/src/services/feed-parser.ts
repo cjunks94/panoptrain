@@ -19,9 +19,32 @@ function parseDirection(tripId: string, protobufDirection: number | null | undef
   return protobufDirection ?? 0;
 }
 
+/**
+ * Epoch seconds from a protobuf uint64, or null when the field was unset.
+ *
+ * protobufjs never yields `undefined` for an unset uint64 — it returns a
+ * Long-zero prototype default — so `field ?? fallback` is dead code and
+ * every "missing" timestamp silently became 0 (#139). Zero is not a
+ * meaningful GTFS-RT time, so it is the presence test.
+ */
+function toEpochSeconds(value: number | Long | null | undefined): number | null {
+  const n = Number(value ?? 0);
+  return n > 0 ? n : null;
+}
+
+function toStopTimeEvent(
+  event: { time?: number | Long | null; delay?: number | null } | null | undefined,
+): StopTimeUpdate["arrival"] {
+  if (!event) return null;
+  return { time: toEpochSeconds(event.time), delay: event.delay ?? 0 };
+}
+
 export function parseFeed(feedId: string, buffer: Uint8Array): ParsedFeedData {
   const feed = transit_realtime.FeedMessage.decode(buffer);
-  const timestamp = Number(feed.header.timestamp ?? 0);
+  // The header timestamp is optional in the proto. Vehicles without their
+  // own timestamp inherit it, so it must be a real time: fall back to the
+  // wall clock rather than 0, which the trains route would TTL-evict.
+  const timestamp = toEpochSeconds(feed.header.timestamp) ?? Math.floor(Date.now() / 1000);
 
   const vehicles: ParsedVehicle[] = [];
   const tripUpdates: ParsedTripUpdate[] = [];
@@ -39,7 +62,7 @@ export function parseFeed(feedId: string, buffer: Uint8Array): ParsedFeedData {
         currentStopSequence: v.currentStopSequence ?? 0,
         currentStopId: v.stopId ?? "",
         currentStatus: STATUS_MAP[v.currentStatus ?? 2] ?? "IN_TRANSIT_TO",
-        timestamp: Number(v.timestamp ?? timestamp),
+        timestamp: toEpochSeconds(v.timestamp) ?? timestamp,
       });
     }
 
@@ -51,12 +74,8 @@ export function parseFeed(feedId: string, buffer: Uint8Array): ParsedFeedData {
       const stopTimeUpdates: StopTimeUpdate[] = (tu.stopTimeUpdate ?? []).map((stu) => ({
         stopId: stu.stopId ?? "",
         stopSequence: stu.stopSequence ?? 0,
-        arrival: stu.arrival
-          ? { time: Number(stu.arrival.time ?? 0), delay: stu.arrival.delay ?? 0 }
-          : null,
-        departure: stu.departure
-          ? { time: Number(stu.departure.time ?? 0), delay: stu.departure.delay ?? 0 }
-          : null,
+        arrival: toStopTimeEvent(stu.arrival),
+        departure: toStopTimeEvent(stu.departure),
       }));
 
       tripUpdates.push({

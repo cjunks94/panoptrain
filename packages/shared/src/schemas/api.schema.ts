@@ -28,6 +28,7 @@ export const TrainsResponseSchema = z.object({
       trains: z.array(TrainPositionSchema),
     })
     .optional(),
+  degradedFeeds: z.array(z.string()).optional(),
 });
 
 /** [lng, lat] GeoJSON convention. */

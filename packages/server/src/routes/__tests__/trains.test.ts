@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { updateCache } from "../../services/cache.js";
+import { updateCache, _resetCacheForTests } from "../../services/cache.js";
 import { createTrainsRouter } from "../trains.js";
 import type { TrainPosition, TrainsResponse } from "@panoptrain/shared";
 
@@ -33,14 +33,38 @@ async function fetch(path: string): Promise<TrainsResponse> {
 
 describe("GET /api/trains", () => {
   beforeEach(() => {
+    _resetCacheForTests("subway");
     updateCache("subway",[]);
     updateCache("subway",[]);
   });
 
-  it("returns empty array when no data", async () => {
+  it("returns 503 before the poller has produced a snapshot (#143)", async () => {
+    // Distinct from "no trains running" (a 200 with an empty array). A
+    // poller that never started — GTFS load failed at boot — used to answer
+    // 200 + [] forever, indistinguishable from 3am. Matches airspace.ts.
+    _resetCacheForTests("subway");
+    const res = await trains.request("/");
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/snapshot/);
+  });
+
+  it("returns an empty array with 200 when a snapshot has no trains", async () => {
     const data = await fetch("/");
     expect(data.trains).toEqual([]);
     expect(data.count).toBe(0);
+  });
+
+  it("reports which feeds were served degraded in the current snapshot (#143)", async () => {
+    updateCache("subway", [makeTrain({ tripId: "a", routeId: "A" })], ["gtfs-ace"]);
+    const data = await fetch("/");
+    expect(data.degradedFeeds).toEqual(["gtfs-ace"]);
+  });
+
+  it("reports no degraded feeds when every feed was live", async () => {
+    updateCache("subway", [makeTrain({ tripId: "a" })]);
+    const data = await fetch("/");
+    expect(data.degradedFeeds).toEqual([]);
   });
 
   it("returns all trains from cache", async () => {
@@ -125,13 +149,10 @@ describe("GET /api/trains", () => {
   });
 
   it("omits previous when only one snapshot has ever been written", async () => {
-    // beforeEach pushes two empty snapshots already, so a single non-empty
-    // update means previous is the most-recent empty one — still defined.
-    // The "no previous" case only happens at server cold start before any
-    // update — verify the API contract handles `previous: undefined` cleanly
-    // by reading the response shape directly.
+    _resetCacheForTests("subway");
+    updateCache("subway", [makeTrain({ tripId: "only" })]);
     const data = await fetch("/");
-    // Empty current is fine; previous may be present (empty) or absent.
-    expect(Array.isArray(data.trains)).toBe(true);
+    expect(data.trains.map((t) => t.tripId)).toEqual(["only"]);
+    expect(data.previous).toBeUndefined();
   });
 });

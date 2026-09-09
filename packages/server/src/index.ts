@@ -16,6 +16,8 @@ import { createShutdownHandler, connectionClosers, SHUTDOWN_GRACE_MS } from "./l
 import { prewarmInterpolator } from "./services/position-interpolator.js";
 import { createTrainsRouter } from "./routes/trains.js";
 import { createStaticRouter } from "./routes/static.js";
+import { createHealthRouter } from "./routes/health.js";
+import { recordPollerStartupFailure } from "./services/poller-status.js";
 import plan from "./routes/plan.js";
 import planLirr from "./routes/plan-lirr.js";
 import airspace from "./routes/airspace.js";
@@ -56,7 +58,10 @@ app.use("/*", cors({ origin: "*" }));
 app.use("/api/*", compress());
 
 // Health check
-app.get("/api/health", (c) => c.json({ status: "ok", uptime: process.uptime() }));
+// Subway is the required poller: without it the app is an empty map, so a
+// revision whose subway GTFS failed to load must not pass Railway's
+// healthcheck. LIRR is optional and only reported (#143).
+app.route("/api/health", createHealthRouter({ required: ["subway"] }));
 
 // Per-mode API routes (PT-503). Subway also exposed at the legacy /api/trains
 // and /api (routes/stops) paths so existing clients keep working during the
@@ -125,6 +130,7 @@ try {
   prewarmInterpolator(subwayGtfs);
   startPolling("subway", subwayGtfs, POLL_INTERVAL);
 } catch (err) {
+  recordPollerStartupFailure("subway", err);
   console.error("Failed to load subway GTFS data:", err);
   console.error('Run "pnpm download-gtfs" to download and process the data first.');
 }
@@ -133,7 +139,8 @@ try {
   const lirrGtfs = loadStaticGtfs("lirr");
   prewarmInterpolator(lirrGtfs);
   startPolling("lirr", lirrGtfs, POLL_INTERVAL);
-} catch {
+} catch (err) {
+  recordPollerStartupFailure("lirr", err);
   console.warn("LIRR GTFS data not available — skipping. Run \"pnpm download-gtfs lirr\" to enable LIRR.");
 }
 
