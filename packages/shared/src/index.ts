@@ -3,6 +3,8 @@ export type { GtfsStop, GtfsRoute, GtfsShape, GtfsTrip, GtfsStopTime, StopOnShap
 export type {
   TrainPosition,
   TrainsResponse,
+  HealthResponse,
+  PollerHealth,
   RoutesGeoJSON,
   RouteFeature,
   StopsGeoJSON,

@@ -16,7 +16,14 @@ export function createTrainsRouter(mode: Mode): Hono {
     c.header("Cache-Control", "public, max-age=5");
 
     if (!snapshot) {
-      return c.json({ timestamp: 0, count: 0, trains: [] } satisfies TrainsResponse);
+      // Distinct from "no trains running" (a 200 with an empty array): the
+      // poller has not produced a snapshot — never started because the GTFS
+      // load failed at boot, or still on its first fetch. Same contract as
+      // airspace.ts; the client treats "API 503" as cold-start (#143).
+      return c.json(
+        { error: "Train data not available — poller has not produced a snapshot yet" },
+        503,
+      );
     }
 
     // Evict trains not updated in the last 5 minutes — likely stale feed
@@ -53,6 +60,7 @@ export function createTrainsRouter(mode: Mode): Hono {
       count: filtered.length,
       trains: filtered,
       previous,
+      degradedFeeds: snapshot.degradedFeeds,
     };
 
     return c.json(response);
