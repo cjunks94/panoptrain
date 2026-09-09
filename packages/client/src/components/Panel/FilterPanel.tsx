@@ -37,6 +37,8 @@ interface FilterPanelProps {
   isStale: boolean;
   lastUpdated: number | null;
   trainCount: number;
+  /** See StatusBadge (#143). */
+  degradedFeeds?: string[];
   stops: StopsGeoJSON | null;
   liveTrains: TrainPosition[];
   onPlanFound?: (plan: TripPlan | LirrTripPlan | null) => void;
@@ -71,6 +73,7 @@ export function FilterPanel({
   onAllOff,
   isStale,
   trainCount,
+  degradedFeeds,
   stops,
   liveTrains,
   onPlanFound,
@@ -280,7 +283,7 @@ export function FilterPanel({
             {isAirspace ? (
               <AirspaceStatusBadge count={aircraftCount} />
             ) : (
-              <StatusBadge isStale={isStale} trainCount={trainCount} />
+              <StatusBadge isStale={isStale} trainCount={trainCount} degradedFeeds={degradedFeeds} />
             )}
           </div>
         </div>
