@@ -12,6 +12,11 @@
  * Polling `/api/trains` until `count > 0` makes the readiness signal
  * align with what tests actually need.
  */
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { FullConfig } from "@playwright/test";
+
 const TRAINS_URL = "http://localhost:3001/api/trains";
 const TIMEOUT_MS = 30_000;
 const POLL_INTERVAL_MS = 500;
@@ -43,6 +48,26 @@ async function waitForTrains(): Promise<void> {
   throw new Error(`[e2e-setup] /api/trains did not report count > 0 within ${TIMEOUT_MS}ms (last: ${lastErr})`);
 }
 
-export default async function globalSetup(): Promise<void> {
+/**
+ * The prod target serves `packages/client/dist` through the API server,
+ * which checks for dist/index.html once at boot and otherwise never serves
+ * static files at all (#182). Without this gate the failure mode is every
+ * page test 404ing on "/" with no hint that a build step was skipped.
+ */
+function assertClientBuilt(config: FullConfig): void {
+  if (config.metadata?.target !== "prod") return;
+  // Anchor on this file, not config.rootDir — rootDir is the resolved
+  // testDir (packages/e2e/tests), one level deeper than the package.
+  const here = dirname(fileURLToPath(import.meta.url));
+  const indexHtml = resolve(here, "../client/dist/index.html");
+  if (existsSync(indexHtml)) return;
+  throw new Error(
+    `[e2e-setup] prod target needs a client build but ${indexHtml} is missing — ` +
+      "run `pnpm --filter @panoptrain/client build` first (or `pnpm test:e2e:prod`).",
+  );
+}
+
+export default async function globalSetup(config: FullConfig): Promise<void> {
+  assertClientBuilt(config);
   await waitForTrains();
 }

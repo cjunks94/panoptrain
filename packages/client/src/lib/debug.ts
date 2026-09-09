@@ -11,6 +11,16 @@
  */
 import type { Mode, TrainsResponse, TrainPosition } from "@panoptrain/shared";
 
+/**
+ * The slice of maplibre's Map the debug surface needs. Structural rather
+ * than `import type { Map } from "maplibre-gl"` so tests can hand in a
+ * plain object and this module stays free of a maplibre type dependency.
+ */
+export interface MapProbe {
+  getLayer: (id: string) => unknown;
+  queryRenderedFeatures: (options: { layers: string[] }) => unknown[];
+}
+
 interface PollRecord {
   mode: Mode;
   at: number;
@@ -92,6 +102,8 @@ interface DebugState {
   sliceHistory: SliceSample[];
   pathFailures: PathFailure[];
   skipBreakdowns: PollSkipBreakdown[];
+  /** Set once the map fires `load`; null until then (#182). */
+  map: MapProbe | null;
 }
 
 const state: DebugState = {
@@ -105,7 +117,24 @@ const state: DebugState = {
   sliceHistory: [],
   pathFailures: [],
   skipBreakdowns: [],
+  map: null,
 };
+
+/**
+ * Called from the map's `onLoad` handler (#182). Latching the instance here
+ * gives e2e an explicit "the map finished loading" signal and a way to ask
+ * what is actually rendered, without reaching into React internals. Both
+ * maplibre-6 regressions from #181 (worker 404, `load` never firing) leave
+ * this unset, so a test that waits on `mapReady()` catches them.
+ */
+export function registerMap(map: MapProbe): void {
+  state.map = map;
+}
+
+/** Test-only: forget the registered map. */
+export function _resetMapForTests(): void {
+  state.map = null;
+}
 
 export function recordPathFailure(failure: PathFailure): void {
   state.pathFailures.push(failure);
@@ -244,6 +273,14 @@ interface PanoptrainDebug {
   pathFailures: () => PathFailure[];
   /** Per-poll skip breakdown: why each train fell off the path-computation path. */
   skipBreakdowns: () => PollSkipBreakdown[];
+  /** True once the map has fired `load` (icons added, layers free to mount). */
+  mapReady: () => boolean;
+  /**
+   * Count of features maplibre is currently drawing for a layer, or null
+   * when the map has not loaded or the layer is not mounted. The null case
+   * is deliberate: "layer missing" and "layer empty" are different failures.
+   */
+  renderedFeatures: (layerId: string) => number | null;
 }
 
 function haversineKm(a: [number, number], b: [number, number]): number {
@@ -258,9 +295,8 @@ function haversineKm(a: [number, number], b: [number, number]): number {
   return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
 }
 
-function installDebugSurface(): void {
-  if (typeof window === "undefined") return;
-  const api: PanoptrainDebug = {
+function createDebugSurface(): PanoptrainDebug {
+  return {
     verbose: (on?: boolean) => {
       if (on !== undefined) {
         state.verbose = on;
@@ -314,8 +350,21 @@ function installDebugSurface(): void {
     sliceHistory: () => [...state.sliceHistory],
     pathFailures: () => [...state.pathFailures],
     skipBreakdowns: () => [...state.skipBreakdowns],
+    mapReady: () => state.map !== null,
+    renderedFeatures: (layerId: string) => {
+      const map = state.map;
+      if (!map || !map.getLayer(layerId)) return null;
+      return map.queryRenderedFeatures({ layers: [layerId] }).length;
+    },
   };
-  (window as unknown as { __panoptrain: PanoptrainDebug }).__panoptrain = api;
 }
 
-installDebugSurface();
+/**
+ * The surface object itself. Exported so unit tests (which run under Node,
+ * with no `window`) can exercise the same functions the browser exposes.
+ */
+export const _debugSurface: PanoptrainDebug = createDebugSurface();
+
+if (typeof window !== "undefined") {
+  (window as unknown as { __panoptrain: PanoptrainDebug }).__panoptrain = _debugSurface;
+}

@@ -1,6 +1,25 @@
 import { defineConfig, devices } from "@playwright/test";
 
-export default defineConfig({
+/**
+ * The API server entry is shared with playwright.prod.config.ts, which runs
+ * the same suite against the production bundle instead of the Vite dev
+ * server (#182). Keep anything both targets need in `shared` below; only
+ * baseURL and the client webServer differ per target.
+ */
+export const apiServer = {
+  // dev:e2e installs MSW handlers for MTA + adsb.lol before the
+  // server boots, so the pollers' first fetch hits canned fixtures
+  // instead of the real upstreams. Tests run with deterministic data,
+  // no network latency, and zero upstream dependency.
+  command: "pnpm --filter @panoptrain/server dev:e2e",
+  url: "http://localhost:3001/api/health",
+  reuseExistingServer: !process.env.CI,
+  timeout: 60_000,
+  stdout: "ignore",
+  stderr: "pipe",
+} as const;
+
+export const shared = defineConfig({
   testDir: "./tests",
   // Wait for the server's first poll cycle to complete before any test
   // runs — webServer URL check only verifies `/api/health` 200, which
@@ -24,7 +43,6 @@ export default defineConfig({
     ["json", { outputFile: "test-results/results.json" }],
   ],
   use: {
-    baseURL: "http://localhost:5173",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
@@ -48,19 +66,18 @@ export default defineConfig({
       use: { ...devices["iPhone 14"] },
     },
   ],
+});
+
+/** Default target: Vite dev server on 5173, proxying /api to the server. */
+export default defineConfig({
+  ...shared,
+  metadata: { target: "dev" },
+  use: {
+    ...shared.use,
+    baseURL: "http://localhost:5173",
+  },
   webServer: [
-    {
-      // dev:e2e installs MSW handlers for MTA + adsb.lol before the
-      // server boots, so the pollers' first fetch hits canned fixtures
-      // instead of the real upstreams. Tests run with deterministic data,
-      // no network latency, and zero upstream dependency.
-      command: "pnpm --filter @panoptrain/server dev:e2e",
-      url: "http://localhost:3001/api/health",
-      reuseExistingServer: !process.env.CI,
-      timeout: 60_000,
-      stdout: "ignore",
-      stderr: "pipe",
-    },
+    apiServer,
     {
       command: "pnpm --filter @panoptrain/client dev",
       url: "http://localhost:5173",
