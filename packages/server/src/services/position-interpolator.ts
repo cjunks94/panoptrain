@@ -27,6 +27,8 @@ interface Lookups {
   allRouteShapes: Map<string, RouteShape[]>;
   stopToShapes: Map<string, RouteShape[]>;
   crossRouteStopToShapes: Map<string, RouteShape[]>;
+  /** patternKey ("routeId-directionId-shapeId") -> that pattern (#142). */
+  byPattern: Map<string, RouteShape>;
 }
 
 const lookupsByGtfs = new WeakMap<StaticGtfsData, Lookups>();
@@ -39,6 +41,7 @@ function getLookups(gtfs: StaticGtfsData): Lookups {
     allRouteShapes: new Map(),
     stopToShapes: new Map(),
     crossRouteStopToShapes: new Map(),
+    byPattern: new Map(),
   };
   const seen = new Set<string>();
 
@@ -56,6 +59,7 @@ function getLookups(gtfs: StaticGtfsData): Lookups {
 
     if (!lk.allRouteShapes.has(routeKey)) lk.allRouteShapes.set(routeKey, []);
     lk.allRouteShapes.get(routeKey)!.push(rs);
+    lk.byPattern.set(shapeKey, rs);
 
     const dists = gtfs.stopDistances[trip.shapeId];
     if (dists) {
@@ -80,16 +84,47 @@ function getLookups(gtfs: StaticGtfsData): Lookups {
 }
 
 /**
- * Find the best matching shape for a train by checking which shape
- * contains the train's current stop. Falls back to the shape with the most stops.
+ * Shape ids the realtime tripId itself names, most specific first.
+ *
+ * LIRR realtime tripIds equal static tripIds, so the static trip's shape is
+ * authoritative. MTA subway tripIds are `<origin-time>_<shapeId>`
+ * (`064750_1..N16R` runs pattern `1..N16R`), so the suffix after the first
+ * underscore is the shape. Some feeds emit a bare suffix (`128300_2..S`)
+ * that is not a shape; callers verify each candidate before using it.
+ */
+function patternCandidates(tripId: string, gtfs: StaticGtfsData): string[] {
+  const out: string[] = [];
+  const staticShape = gtfs.trips[tripId]?.shapeId;
+  if (staticShape) out.push(staticShape);
+  const underscore = tripId.indexOf("_");
+  if (underscore >= 0) out.push(tripId.slice(underscore + 1));
+  return out;
+}
+
+/**
+ * Find the best matching shape for a train.
+ *
+ * Pass 0 trusts the pattern the trip itself names, provided that pattern
+ * serves the train's current stop (#142). Before this, pass 1 returned the
+ * first shape serving the stop — on short-turning routes an arbitrary one
+ * of several patterns, so every northbound 1 south of 137 St carried one
+ * fixed headsign out of three. The stop check keeps rerouted trains
+ * (pattern says one line, stop is on another) on the stop-based passes.
  */
 function findBestShape(
+  tripId: string,
   routeId: string,
   directionId: number,
   stopId: string,
   gtfs: StaticGtfsData,
 ): RouteShape | null {
   const lk = getLookups(gtfs);
+
+  // Pass 0: the trip's own pattern, if it serves the current stop
+  for (const shapeId of patternCandidates(tripId, gtfs)) {
+    const rs = lk.byPattern.get(`${routeId}-${directionId}-${shapeId}`);
+    if (rs && gtfs.stopDistances[shapeId]?.[stopId] !== undefined) return rs;
+  }
 
   // Pass 1: Exact route+stop match — handles normal operation and branching routes
   const stopKey = `${routeId}-${directionId}-${stopId}`;
@@ -213,7 +248,7 @@ function estimateVehicle(
   gtfs: StaticGtfsData,
   now: number,
 ): TrainPosition | null {
-  const rs = findBestShape(vehicle.routeId, vehicle.directionId, vehicle.currentStopId, gtfs);
+  const rs = findBestShape(vehicle.tripId, vehicle.routeId, vehicle.directionId, vehicle.currentStopId, gtfs);
   if (!rs) return null;
 
   const lineData = getLine(rs.shapeId, gtfs);
@@ -349,7 +384,7 @@ function estimateFromTripUpdate(
 
   // Use the first stop in the update to find the right branch/shape
   const firstStopId = tu.stopTimeUpdates[0].stopId;
-  const rs = findBestShape(tu.routeId, tu.directionId, firstStopId, gtfs);
+  const rs = findBestShape(tu.tripId, tu.routeId, tu.directionId, firstStopId, gtfs);
   if (!rs) return null;
 
   const lineData = getLine(rs.shapeId, gtfs);
