@@ -128,3 +128,63 @@ describe("mta-poller resilience", () => {
     expect(lirrFallback!.data.vehicles[0].tripId).toBe("lirr-train");
   });
 });
+
+/**
+ * #143 — a feed served from the fallback cache used to be flattened into
+ * the snapshot with no trace: the response timestamp read current and the
+ * only signal was a log line. The poll now records which feeds were
+ * degraded (cached or dropped) on the snapshot and in the poller status.
+ */
+describe("mta-poller degraded-feed reporting (#143)", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // LIRR has a single feed, which keeps the fetch choreography readable.
+  const emptyGtfs = {
+    trips: {}, stops: {}, routes: {}, shapes: {}, stopSequences: {}, stopDistances: {}, transfers: [],
+  };
+
+  it("records a feed served from cache as degraded, then clears it when live again", { timeout: 15_000 }, async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(okResponse(encodeFeed([{ tripId: "t1", routeId: "1" }])))
+      .mockResolvedValue(failResponse());
+
+    const { startPolling, stopPolling } = await import("../mta-poller.js");
+    const { getCurrentSnapshot, _resetCacheForTests } = await import("../../services/cache.js");
+    const { getPollerState, _resetPollerStatusForTests } = await import("../../services/poller-status.js");
+    const { feedsForMode } = await import("@panoptrain/shared");
+    const lirrFeedId = feedsForMode("lirr")[0].id;
+    _resetCacheForTests("lirr");
+    _resetPollerStatusForTests();
+
+    try {
+      // Poll 1: live.
+      startPolling("lirr", emptyGtfs, 60_000);
+      await vi.waitFor(() => expect(getCurrentSnapshot("lirr")).not.toBeNull());
+      expect(getPollerState("lirr").started).toBe(true);
+      expect(getCurrentSnapshot("lirr")!.degradedFeeds).toEqual([]);
+      expect(getPollerState("lirr").degradedFeeds).toEqual([]);
+
+      // Poll 2: upstream down, cache fallback (retry chain takes ~2s).
+      startPolling("lirr", emptyGtfs, 60_000);
+      await vi.waitFor(
+        () => expect(getCurrentSnapshot("lirr")!.degradedFeeds).toEqual([lirrFeedId]),
+        { timeout: 10_000 },
+      );
+      expect(getPollerState("lirr").degradedFeeds).toEqual([lirrFeedId]);
+
+      // Poll 3: live again — degraded list clears.
+      fetchSpy.mockResolvedValue(okResponse(encodeFeed([{ tripId: "t2", routeId: "1" }])));
+      startPolling("lirr", emptyGtfs, 60_000);
+      await vi.waitFor(() => expect(getCurrentSnapshot("lirr")!.degradedFeeds).toEqual([]), { timeout: 5_000 });
+      expect(getPollerState("lirr").lastPollAt).not.toBeNull();
+    } finally {
+      stopPolling();
+    }
+  });
+});

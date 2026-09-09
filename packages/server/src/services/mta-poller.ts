@@ -5,6 +5,7 @@ import { fetchWithRetry } from "./base-poller.js";
 import { parseFeed } from "./feed-parser.js";
 import { interpolatePositions } from "./position-interpolator.js";
 import { updateCache } from "./cache.js";
+import { markPollerStarted, recordPollResult } from "./poller-status.js";
 import type { StaticGtfsData } from "./gtfs-loader.js";
 
 const intervals: Partial<Record<Mode, ReturnType<typeof setInterval>>> = {};
@@ -29,6 +30,7 @@ export function startPolling(mode: Mode, gtfs: StaticGtfsData, intervalMs: numbe
   consoleLogger.info("starting poller", { poller: "mta", mode, intervalMs });
 
   aborts[mode] = new AbortController();
+  markPollerStarted(mode);
   void pollFeeds(mode, gtfs);
   intervals[mode] = setInterval(() => void pollFeeds(mode, gtfs), intervalMs);
 }
@@ -136,20 +138,30 @@ async function pollFeeds(mode: Mode, gtfs: StaticGtfsData): Promise<void> {
     let liveCount = 0;
     let cachedCount = 0;
     let failCount = 0;
+    // Feeds that did not come back live this poll — served from the
+    // fallback cache or dropped. Surfaced on the snapshot and in
+    // /api/health so a down feed is visible, not just logged (#143).
+    const degradedFeeds: string[] = [];
 
-    for (const o of outcomes) {
+    outcomes.forEach((o, i) => {
       if (!o) {
         failCount++;
-        continue;
+        degradedFeeds.push(feeds[i].id);
+        return;
       }
-      if (o.source === "live") liveCount++;
-      else cachedCount++;
+      if (o.source === "live") {
+        liveCount++;
+      } else {
+        cachedCount++;
+        degradedFeeds.push(o.feedId);
+      }
       allVehicles.push(...o.data.vehicles);
       allTripUpdates.push(...o.data.tripUpdates);
-    }
+    });
 
     const trains = interpolatePositions(allVehicles, allTripUpdates, gtfs);
-    updateCache(mode, trains);
+    updateCache(mode, trains, degradedFeeds);
+    recordPollResult(mode, degradedFeeds);
 
     consoleLogger.info("poll ok", {
       poller: "mta",
