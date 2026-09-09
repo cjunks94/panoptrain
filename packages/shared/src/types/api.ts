@@ -1,3 +1,5 @@
+import type { Mode } from "../constants/feeds.js";
+
 /** A single train's position as returned by the server API */
 export interface TrainPosition {
   tripId: string;
@@ -30,6 +32,12 @@ export interface TrainsResponse {
   timestamp: number;
   count: number;
   trains: TrainPosition[];
+  /** Feed ids whose data in this snapshot came from the server's fallback
+   *  cache (upstream fetch failed, parse up to 5 min old) or were dropped
+   *  outright. Empty when every feed was live. Lets the client show a
+   *  degraded indicator instead of trains silently gliding on frozen
+   *  predictions and then vanishing (#143). Optional for older clients. */
+  degradedFeeds?: string[];
   /** The poll snapshot prior to the current one (~one POLL_INTERVAL earlier).
    *  Lets the client bootstrap interpolation immediately on the first poll —
    *  without it, trains sit motionless until the second poll arrives 30s
@@ -39,6 +47,32 @@ export interface TrainsResponse {
     timestamp: number;
     trains: TrainPosition[];
   };
+}
+
+/** Per-poller state in GET /api/health (#143). */
+export interface PollerHealth {
+  /** Whether this poller's absence fails the healthcheck. */
+  required: boolean;
+  started: boolean;
+  /** Epoch ms; null until startPolling ran. */
+  startedAt: number | null;
+  /** Epoch ms of the last completed poll; null before the first. */
+  lastPollAt: number | null;
+  /** Seconds since lastPollAt at response time; null before the first poll. */
+  lastPollAgeS: number | null;
+  /** Feed ids served from cache or dropped on the last poll. */
+  degradedFeeds: string[];
+  /** Startup failure message, when the poller never started because of one. */
+  error: string | null;
+}
+
+/** Response from GET /api/health. HTTP 503 when `status` is "error". */
+export interface HealthResponse {
+  /** error = a required poller never started; degraded = running, but the
+   *  last poll fell back to cache or dropped a feed; ok otherwise. */
+  status: "ok" | "degraded" | "error";
+  uptime: number;
+  pollers: Record<Mode, PollerHealth>;
 }
 
 /** Response from GET /api/routes — GeoJSON */
