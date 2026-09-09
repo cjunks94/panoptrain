@@ -17,11 +17,17 @@ export interface ParsedTripUpdate {
   stopTimeUpdates: StopTimeUpdate[];
 }
 
+/**
+ * A StopTimeEvent's `time` is null when the feed omitted it (delay-only
+ * events are legal GTFS-RT). The parser normalizes protobuf's 0 default to
+ * null so consumers' `arrival?.time ?? departure?.time` chains fall through
+ * instead of reading 0 as a real epoch (#139).
+ */
 export interface StopTimeUpdate {
   stopId: string;
   stopSequence: number;
-  arrival: { time: number; delay: number } | null;
-  departure: { time: number; delay: number } | null;
+  arrival: { time: number | null; delay: number } | null;
+  departure: { time: number | null; delay: number } | null;
 }
 
 /** Combined feed data after parsing */
