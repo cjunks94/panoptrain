@@ -28,3 +28,8 @@ export function getCurrentSnapshot(mode: Mode): Snapshot | null {
 export function getPreviousSnapshot(mode: Mode): Snapshot | null {
   return snapshots[mode].previous;
 }
+
+/** Test-only: return a mode to the cold-start state (no snapshot yet). */
+export function _resetCacheForTests(mode: Mode): void {
+  snapshots[mode] = { current: null, previous: null };
+}
