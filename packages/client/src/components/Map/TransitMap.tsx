@@ -20,6 +20,7 @@ import { useViewportHeight } from "../../hooks/useViewportHeight.js";
 import { computeFitPadding } from "../../lib/mapPadding.js";
 import { airportFocusOptions } from "../../lib/airportFocus.js";
 import { popupOffsetPx } from "../../lib/popupPlacement.js";
+import { registerMap } from "../../lib/debug.js";
 import { TrainPopup } from "./TrainPopup.js";
 import { MapLoadingBadge } from "./MapLoadingBadge.js";
 import { AircraftPopup } from "./AircraftPopup.js";
@@ -545,6 +546,9 @@ export function TransitMap({ geojsonRef, interpolateFrame, trains, routeShapes, 
       map.addImage(caretImageId(deg), createCaretIcon(76, deg), { sdf: true });
     }
     setIconsReady(true);
+    // Latch the instance for window.__panoptrain.mapReady() /
+    // renderedFeatures() — the e2e map-loaded assertion (#182).
+    registerMap(map);
   }, []);
 
   // Keep train layers on top of everything else. The trains <Source> is
