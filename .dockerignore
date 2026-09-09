@@ -1,10 +1,43 @@
-node_modules
-dist
-.git
-.env
-*.tsbuildinfo
+# Docker matches these against the full context-relative path (Go
+# filepath.Match plus `**`), with NO implicit any-directory behaviour like
+# .gitignore. A bare `node_modules` matches only /node_modules; nested
+# packages/*/node_modules, dist, coverage and a nested .env all shipped into
+# the image before #146. Use `**/` wherever a name should match at any depth.
+
+# Dependencies — reinstalled from the lockfile inside the image.
+**/node_modules
+
+# Build outputs and caches — the image builds its own client bundle.
+**/dist
+**/coverage
+**/*.tsbuildinfo
+
+# Secrets and local config, at any depth. Root .env holds only PORT /
+# POLL_INTERVAL_MS / LOG_LEVEL today, but `COPY packages/server/` would bake
+# a future packages/server/.env straight into a layer.
+**/.env
+**/.env.*
+
+# Static GTFS — downloaded fresh during the build (Dockerfile), so a stale
+# local copy would only double the layer size. Covers gtfs/ and gtfs-lirr/.
+packages/server/src/data/gtfs*/
+
+# Tests, test tooling, and the e2e-only server entrypoint. The runtime is
+# `tsx src/index.ts`; nothing here is reachable from it.
 packages/e2e
-packages/server/src/data/gtfs/*.json
+**/__tests__
+**/*.test.ts
+**/*.test.tsx
+**/vitest.config.*
+packages/server/src/index-e2e.ts
+packages/server/src/test-mocks.ts
+
+# Repo metadata and tooling.
+.git
 .github
+.claude
 .vscode
 .idea
+docs
+flake-runs
+*.md
