@@ -39,7 +39,7 @@ const cachedActiveServices = new Map<string, Set<string>>();
 export function clearLirrPlannerCache(): void {
   cachedIndex = null;
   cachedActiveServices.clear();
-  midnightCache.clear();
+  serviceDayStartCache.clear();
 }
 
 function buildIndex(schedule: LirrScheduleData): ScheduleIndex {
@@ -153,23 +153,24 @@ function nyDateString(epochMs: number): string {
 }
 
 /**
- * Cache of (NY service date YYYYMMDD) → epoch ms at NY-local midnight.
+ * Cache of (NY service date YYYYMMDD) → epoch ms at the start of that GTFS
+ * service day, defined as NY-local noon minus twelve hours.
  *
  * Computing the offset via Intl.DateTimeFormat is expensive (~1-2ms per call
  * on Node) and dominates planner runtime when called per stop_time. Caching
  * once per service date drops planning latency from multi-second to <100ms.
  */
-const midnightCache = new Map<string, number>();
+const serviceDayStartCache = new Map<string, number>();
 
-/** Compute epoch ms at NY-local midnight on a YYYYMMDD date. Iterates twice
- *  to converge through any DST boundary; midnight is unambiguous in NY. */
-function nyMidnightMs(yyyymmdd: string): number {
-  const cached = midnightCache.get(yyyymmdd);
-  if (cached !== undefined) return cached;
+/** Epoch ms at a NY-local wall-clock hour on a YYYYMMDD date. Iterates twice
+ *  to converge through any DST boundary. Only call with hours that exist and
+ *  are unambiguous in NY (both transitions happen at 02:00). */
+function nyWallMs(yyyymmdd: string, hour: number): number {
   const y = parseInt(yyyymmdd.slice(0, 4), 10);
   const m = parseInt(yyyymmdd.slice(4, 6), 10);
   const d = parseInt(yyyymmdd.slice(6, 8), 10);
-  let ms = Date.UTC(y, m - 1, d, 0, 0, 0);
+  const want = Date.UTC(y, m - 1, d, hour, 0, 0);
+  let ms = want;
   for (let i = 0; i < 2; i++) {
     const parts = new Intl.DateTimeFormat("en-CA", {
       timeZone: "America/New_York",
@@ -186,17 +187,33 @@ function nyMidnightMs(yyyymmdd: string): number {
     const hh = parseInt(parts.find((p) => p.type === "hour")!.value, 10) % 24;
     const mn = parseInt(parts.find((p) => p.type === "minute")!.value, 10);
     const got = Date.UTC(yy, mm - 1, dd, hh, mn, 0);
-    const want = Date.UTC(y, m - 1, d, 0, 0, 0);
     ms += want - got;
   }
-  midnightCache.set(yyyymmdd, ms);
   return ms;
 }
 
-/** Convert a (NY service date, seconds-after-midnight) to epoch ms. Hot path —
- *  add to the cached midnight, no Intl calls after the first per date. */
-function nyWallToEpoch(yyyymmdd: string, secondsAfterMidnight: number): number {
-  return nyMidnightMs(yyyymmdd) + secondsAfterMidnight * 1000;
+/**
+ * Epoch ms at the start of a GTFS service day: NY-local noon minus twelve
+ * hours (#137). GTFS defines stop times relative to that instant, not to
+ * midnight, precisely because a service day is 23 or 25 hours long when it
+ * spans a DST change. Summing from midnight was one hour late for every
+ * departure after 02:00 on the spring-forward day and one hour early on the
+ * fall-back day. Noon is resolved through Intl (unambiguous on both
+ * transition days, which change at 02:00) and the 12h subtracted in UTC.
+ */
+function nyServiceDayStartMs(yyyymmdd: string): number {
+  const cached = serviceDayStartCache.get(yyyymmdd);
+  if (cached !== undefined) return cached;
+  const ms = nyWallMs(yyyymmdd, 12) - 12 * 3600 * 1000;
+  serviceDayStartCache.set(yyyymmdd, ms);
+  return ms;
+}
+
+/** Convert a (NY service date, GTFS seconds-into-service-day) to epoch ms.
+ *  Hot path — add to the cached service-day start, no Intl calls after the
+ *  first per date. */
+function nyWallToEpoch(yyyymmdd: string, secondsIntoServiceDay: number): number {
+  return nyServiceDayStartMs(yyyymmdd) + secondsIntoServiceDay * 1000;
 }
 
 interface DepartureCandidate {
