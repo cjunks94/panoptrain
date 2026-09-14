@@ -25,13 +25,13 @@
     "csv-parse": "^7.0.2",
     "dotenv": "^17.4.2",
     "gtfs-realtime-bindings": "^2.2.0",
-    "hono": "^4.13.5",
-    "jszip": "^3.10.0",
+    "hono": "^4.13.7",
+    "jszip": "^3.10.2",
     "protobufjs": "^8.8.0",
-    "zod": "^4.5.4"
+    "zod": "^4.6.2"
   },
   "devDependencies": {
-    "@types/node": "^26.4.1",
+    "@types/node": "^26.5.1",
     "@vitest/coverage-v8": "^5.0.0",
     "msw": "^2.15.0",
     "tsx": "^4.23.13",
