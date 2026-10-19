@@ -15,27 +15,27 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@hono/node-server": "^2.1.1",
+    "@hono/node-server": "^2.1.5",
     "@panoptrain/shared": "workspace:*",
     "@turf/along": "^7.4.0",
     "@turf/bearing": "^7.4.0",
     "@turf/helpers": "^7.4.0",
     "@turf/length": "^7.4.0",
     "@turf/nearest-point-on-line": "^7.4.0",
-    "csv-parse": "^7.0.2",
+    "csv-parse": "^7.0.3",
     "dotenv": "^17.4.2",
     "gtfs-realtime-bindings": "^2.2.0",
-    "hono": "^4.13.5",
-    "jszip": "^3.10.0",
-    "protobufjs": "^8.8.0",
-    "zod": "^4.5.4"
+    "hono": "^4.13.13",
+    "jszip": "^3.10.2",
+    "protobufjs": "^8.8.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/node": "^26.4.1",
-    "@vitest/coverage-v8": "^5.0.0",
+    "@types/node": "^26.6.5",
+    "@vitest/coverage-v8": "^5.0.5",
     "msw": "^2.15.0",
-    "tsx": "^4.23.13",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3",
-    "vitest": "^5.0.0"
+    "vitest": "^5.0.5"
   }
 }
